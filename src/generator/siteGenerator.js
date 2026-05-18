@@ -273,6 +273,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
     generatedImages: []
   };
   sanitizeBlueprintForBusiness(site);
+  applyNatureContentCorrections(site);
   applyClientAnswers(site);
   progress({ status: 'running', progress: 22, message: 'Building SEO keyword map and density targets' });
   applySeoKeywordStrategy(site);
@@ -505,8 +506,8 @@ function sanitizeBlueprintForBusiness(site) {
 
 function correctedProjectNature(site) {
   const text = `${site.brief.industry || ''} ${site.brief.businessName || ''} ${site.blueprint?.businessType || ''} ${site.blueprint?.primaryGoal || ''} ${site.metadata?.prompt || ''}`.toLowerCase();
+  if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english|exam|revision|private tutor|online tutoring/.test(text)) return 'education';
   if (/insolvency|restructuring|business advisory|financial distress|advisory|accountant|accounting|consultant|consulting|finance|solicitor|law|legal|professional/.test(text)) return 'professional';
-  if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english/.test(text)) return 'education';
   if (/shoe|shop|retail|e-?commerce|store|product|fashion|clothing|jewellery|jewelry/.test(text)) return 'commerce';
   if (/restaurant|cafe|bar|bakery|takeaway|food|menu|reservation/.test(text)) return 'hospitality';
   if (/clinic|dental|physio|health|therapy|medical|wellness|salon|spa/.test(text)) return 'care';
@@ -537,6 +538,121 @@ function businessTypeLabel(nature, fallback) {
     software: 'software / SaaS product',
     professional: 'professional services business'
   }[nature] || fallback || 'local service business';
+}
+
+function applyNatureContentCorrections(site) {
+  const nature = projectNature(site);
+  const prompt = String(site.metadata?.prompt || '').toLowerCase();
+  const genericServiceTitles = (site.content.services || []).map((service) => String(service.title || '').toLowerCase()).join(' ');
+  const genericCopy = /professional services|clearer way to choose|consultation planning delivery support/.test(`${site.brief.industry} ${site.content.hero?.headline} ${genericServiceTitles}`.toLowerCase());
+  if (!genericCopy && !/tutor|tuition|gcse|shoe|restaurant|clinic|software|property/.test(prompt)) return;
+  if (nature === 'education') applyEducationContent(site);
+  if (nature === 'commerce' && /shoe|footwear|fashion|sale|shop|retail/.test(prompt)) applyShoeCommerceContent(site);
+  if (nature === 'hospitality') applyHospitalityContent(site);
+}
+
+function applyEducationContent(site) {
+  site.brief.location = inferPromptLocation(site.metadata?.prompt, site.brief.location);
+  site.brief.industry = /gcse|math|science|tutor/i.test(site.metadata?.prompt || '') ? 'Private GCSE tutoring' : 'Education';
+  site.brief.seoKeywords = {
+    primary: [`GCSE tutor in ${site.brief.location}`, `private tutoring in ${site.brief.location}`, `${site.brief.businessName} tutor`],
+    secondary: [`GCSE maths tutor ${site.brief.location}`, `GCSE science tutor ${site.brief.location}`, `online GCSE tutoring`, `private tutor near me`],
+    localModifiers: [site.brief.location, `near ${site.brief.location}`, 'online', 'local']
+  };
+  site.content.seoStrategy = {
+    primaryKeywords: site.brief.seoKeywords.primary,
+    secondaryKeywords: site.brief.seoKeywords.secondary,
+    localModifiers: site.brief.seoKeywords.localModifiers,
+    pageKeywordMap: {
+      Home: site.brief.seoKeywords.primary,
+      Courses: site.brief.seoKeywords.secondary,
+      Contact: [`${site.brief.businessName} contact`, `GCSE tutor in ${site.brief.location}`]
+    },
+    densityTargets: { primary: '0.8-1.2%', secondary: '0.2-0.6%' },
+    naturalUsageNotes: 'Tutoring keywords are used naturally around parent/student decisions, not stuffed into every sentence.'
+  };
+  site.content.hero = {
+    ...site.content.hero,
+    kicker: `${site.brief.location} private tutoring`,
+    headline: `${site.brief.businessName} helps students feel prepared, not pressured.`,
+    subtext: 'Focused one-to-one tutoring for GCSE maths and science, built around confidence, exam technique, and clear weekly progress.',
+    primaryCta: 'Book a tutoring enquiry',
+    secondaryCta: 'View learning routes'
+  };
+  site.content.services = [
+    { title: 'GCSE Maths Tuition', description: 'Structured maths support for students who need clearer methods, exam confidence, and regular practice that actually sticks.', bullets: ['Algebra, number, geometry, and problem solving', 'Past-paper practice with feedback', 'Weekly progress notes for parents'], outcome: 'Students understand the method before they memorise the answer.' },
+    { title: 'GCSE Science Tuition', description: 'Calm biology, chemistry, and physics support with simple explanations, retrieval practice, and exam-board-aware revision.', bullets: ['Topic gaps identified early', 'Exam command words explained', 'Practical revision plans'], outcome: 'Students know what to revise and how to answer.' },
+    { title: 'Exam Confidence Sessions', description: 'Targeted sessions for students who know the content but lose marks through timing, anxiety, or unclear working.', bullets: ['Timed question practice', 'Mark scheme language', 'Confidence-building routines'], outcome: 'Better answers under exam conditions.' },
+    { title: 'Parent Progress Reviews', description: 'Short, useful updates so parents understand what is improving, what still needs work, and how to support between lessons.', bullets: ['Plain-English progress notes', 'Next-topic planning', 'Home practice suggestions'], outcome: 'No guessing about progress.' }
+  ];
+  site.content.differentiators = [
+    { title: 'Clear weekly progress', text: 'Every lesson has a focus, a reason, and a next step so families can see momentum.' },
+    { title: 'Exam-board aware teaching', text: 'Lessons connect subject knowledge with the way marks are actually awarded.' },
+    { title: 'Confidence before pressure', text: 'The tone is calm and practical, helping students ask questions without embarrassment.' }
+  ];
+  site.content.faqs = [
+    { question: 'Do you cover GCSE maths and science?', answer: 'Yes. Sessions can focus on GCSE maths, biology, chemistry, physics, or a mixed weekly plan depending on the student.' },
+    { question: 'Can lessons be online?', answer: 'Yes. Online tutoring works well with shared whiteboards, worked examples, and focused past-paper practice.' },
+    { question: 'How soon can a student improve?', answer: 'Most students feel clearer after the first few sessions, with measurable progress depending on attendance and practice.' },
+    { question: 'Do parents get updates?', answer: 'Yes. Parents can receive concise progress notes and suggested practice areas after lessons.' }
+  ];
+  site.content.testimonials = [
+    { quote: 'The lessons made maths feel manageable again. We finally understood what to practise each week.', name: 'Sarah H.', context: 'GCSE parent' },
+    { quote: 'Science revision became much less stressful once the topics were broken down clearly.', name: 'Imran K.', context: 'Year 11 student' },
+    { quote: 'The progress updates were simple, honest, and useful.', name: 'Claire D.', context: 'Parent' }
+  ];
+  site.content.localProof = `${site.brief.businessName} gives families in ${site.brief.location} a calm, structured route to GCSE maths and science progress.`;
+  site.content.trustSignals = ['GCSE maths and science focus', 'Clear parent progress notes', 'Online or local tutoring', 'Exam-board aware planning'];
+  if (/Manchester|King Street/i.test(site.brief.address || '')) site.brief.address = `${site.brief.location} and online tutoring`;
+  site.content.brandThesis = 'The site is built around the parent decision: can this tutor explain clearly, build confidence, and improve exam readiness without adding pressure?';
+  site.content.microcopy.contactHint = 'Tell us the year group, subject, exam board if known, and what feels hardest right now.';
+  site.content.stats = [
+    { value: '92', label: 'of families want clearer weekly progress' },
+    { value: '4', label: 'focused GCSE support routes' },
+    { value: '7', label: 'days to receive a learning plan' }
+  ];
+  site.content.processSteps = [
+    { title: 'Find the gaps', text: 'The first session identifies the topics, confidence points, and exam skills that need attention.' },
+    { title: 'Build a weekly plan', text: 'Lessons are sequenced so the student knows what is being improved and why it matters.' },
+    { title: 'Practise exam answers', text: 'Past-paper questions are used to connect understanding with marks.' },
+    { title: 'Update the parent', text: 'Progress is explained clearly so families can support the next step.' }
+  ];
+  site.content.blogPosts[0] = {
+    title: 'How to help a GCSE student revise without adding pressure',
+    intro: 'A practical guide for families who want structure, confidence, and better revision habits before exam season.'
+  };
+}
+
+function applyShoeCommerceContent(site) {
+  site.brief.location = inferPromptLocation(site.metadata?.prompt, site.brief.location);
+  site.brief.industry = 'Shoe sale retail';
+  site.content.hero = {
+    ...site.content.hero,
+    kicker: 'Fresh footwear deals',
+    headline: `${site.brief.businessName} makes shoe shopping feel simple, stylish, and affordable.`,
+    subtext: 'Browse practical everyday pairs, smarter styles, and seasonal offers without digging through clutter.',
+    primaryCta: 'Shop the sale',
+    secondaryCta: 'View new arrivals'
+  };
+}
+
+function applyHospitalityContent(site) {
+  site.brief.location = inferPromptLocation(site.metadata?.prompt, site.brief.location);
+  site.content.hero = {
+    ...site.content.hero,
+    kicker: `${site.brief.location} dining`,
+    headline: `${site.brief.businessName} turns dinner into something worth planning.`,
+    subtext: 'A warm restaurant website built around atmosphere, menu confidence, booking intent, and easy contact.',
+    primaryCta: 'Reserve a table',
+    secondaryCta: 'See menu highlights'
+  };
+}
+
+function inferPromptLocation(prompt, fallback) {
+  const text = String(prompt || '');
+  const match = text.match(/\bin\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b/);
+  if (match) return match[1].replace(/\s+(called|for|with|and|that|who)\b.*$/i, '').trim();
+  return fallback;
 }
 
 function primaryGoalForCorrectedNature(nature, site) {
@@ -986,8 +1102,8 @@ function projectNature(site) {
   const declared = String(site.blueprint?.projectNature || '').toLowerCase();
   if (['commerce', 'hospitality', 'care', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'service'].includes(declared)) return declared;
   const text = `${site.brief.industry || ''} ${site.blueprint?.businessType || ''} ${site.blueprint?.primaryGoal || ''} ${site.metadata?.prompt || ''}`.toLowerCase();
+  if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english|exam|revision|private tutor|online tutoring/.test(text)) return 'education';
   if (/insolvency|restructuring|business advisory|financial distress|advisory|accountant|accounting|consultant|consulting|finance|solicitor|law|legal|professional/.test(text)) return 'professional';
-  if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english/.test(text)) return 'education';
   if (/shoe|shop|retail|e-?commerce|store|product|fashion|clothing|jewellery|jewelry/.test(text)) return 'commerce';
   if (/restaurant|cafe|bar|bakery|takeaway|food|menu|reservation/.test(text)) return 'hospitality';
   if (/clinic|dental|physio|health|therapy|medical|wellness|salon|spa/.test(text)) return 'care';
@@ -1176,20 +1292,33 @@ function homeKeywords(site) {
 }
 
 function natureHome(site, pageItem) {
-  const renderers = {
-    commerce: commerceHome,
-    hospitality: hospitalityHome,
-    care: careHome,
-    professional: professionalHome,
-    fitness: fitnessHome,
-    portfolio: portfolioHome,
-    software: softwareHome,
-    property: propertyHome,
-    event: eventHome,
-    education: educationHome,
-    service: serviceHome
+  const nature = projectNature(site);
+  const requested = String(pageItem?.layoutArchetype || '').trim();
+  const genericHomeRenderers = {
+    heroEditorial: dynamicHomeEditorial,
+    heroShowcase: dynamicHomeShowcase,
+    heroMagazine: dynamicHomeMagazine,
+    heroPoster: dynamicHomePoster,
+    heroProductWall: dynamicHomeProductWall,
+    heroSplit: dynamicHomeSplit
   };
-  return (renderers[projectNature(site)] || serviceHome)(site, pageItem);
+  if (genericHomeRenderers[requested]) return genericHomeRenderers[requested](site, pageItem);
+  const pools = {
+    commerce: [commerceHome, dynamicHomeProductWall, dynamicHomeShowcase, dynamicHomeMagazine],
+    hospitality: [hospitalityHome, hospitalityBookingHome, dynamicHomeMagazine],
+    care: [careHome, careTrustHome, dynamicHomeEditorial],
+    professional: [professionalHome, professionalBriefingHome, professionalAuthorityHome],
+    fitness: [fitnessHome, dynamicHomePoster, dynamicHomeShowcase],
+    portfolio: [portfolioHome, dynamicHomeMagazine, dynamicHomePoster],
+    software: [softwareHome, softwareConversionHome, dynamicHomeSplit],
+    property: [propertyHome, dynamicHomeShowcase, dynamicHomeEditorial],
+    event: [eventHome, dynamicHomePoster, dynamicHomeMagazine],
+    education: [educationHome, educationOutcomeHome, dynamicHomeEditorial],
+    service: [serviceHome, localServiceHome, dynamicHomeShowcase]
+  };
+  const choices = pools[nature] || pools.service;
+  const seed = hashNumber(`${site.generationSeed}-${nature}-${site.brief.businessName}-${site.blueprint?.visualStrategy || ''}`);
+  return choices[seed % choices.length](site, pageItem);
 }
 
 function commerceHome(site, pageItem) {
@@ -1207,9 +1336,25 @@ function hospitalityHome(site, pageItem) {
   <section class="booking-strip reveal"><strong>Open this week</strong><span>${esc(site.brief.address)}</span><a class="button secondary" href="contact.html">Book now</a></section>`;
 }
 
+function hospitalityBookingHome(site, pageItem) {
+  return `<section class="booking-home">
+    <div class="reveal"><p class="eyebrow">${esc(site.brief.location)} reservations</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="hero-actions"><a class="button" href="contact.html">Book a table</a><a class="text-link" href="${alternateHref(site, 'menu.html')}">View menu</a></div></div>
+    <form class="booking-card reveal" action="admin/contact.php" method="post"><h2>Plan a visit</h2><label>Date<input type="date" name="date"></label><label>Party size<input name="party" placeholder="2 people"></label><label>Message<textarea name="message" placeholder="Occasion, time, dietary notes"></textarea></label><button class="button">Request booking</button></form>
+    <figure class="reveal"><img src="${imageUrl(site, `hospitality table detail ${site.generationSeed}`, 900, 1100)}" alt="${esc(site.brief.businessName)} dining detail"></figure>
+  </section>`;
+}
+
 function careHome(site, pageItem) {
   return `<section class="care-hero"><div class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book an appointment')}</a></div><div class="care-card reveal"><h2>Start with clarity</h2><ol>${site.content.processSteps.slice(0, 3).map((step) => `<li><strong>${esc(step.title)}</strong><span>${esc(step.text)}</span></li>`).join('')}</ol></div></section>
   <section class="service-showcase">${site.content.services.slice(0, 4).map((s, i) => `<article class="service-row reveal"><div><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(s.title)}</h2><p>${esc(s.description)}</p></div><ul>${(s.bullets || []).map((b) => `<li>${esc(b)}</li>`).join('')}</ul></article>`).join('')}</section>`;
+}
+
+function careTrustHome(site, pageItem) {
+  return `<section class="care-trust-home">
+    <div class="reveal"><p class="eyebrow">Reassurance first</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div></div>
+    <figure class="reveal"><img src="${imageUrl(site, `calm healthcare consultation ${site.generationSeed}`, 1100, 850)}" alt="${esc(site.brief.businessName)} consultation"></figure>
+    <aside class="care-trust-panel reveal"><h2>Before you book</h2>${site.content.faqs.slice(0, 3).map((faq) => `<details open><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}<a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book an appointment')}</a></aside>
+  </section>`;
 }
 
 function professionalHome(site, pageItem) {
@@ -1225,6 +1370,24 @@ function professionalHome(site, pageItem) {
   <section class="professional-intelligence professional-method-section"><div class="section-heading reveal"><p class="eyebrow">Why this matters</p><h2>${esc(psyche.methodHeadline)}</h2><p>${esc(site.content.brandThesis)}</p></div><div class="decision-stack">${site.content.processSteps.slice(0, 4).map((step, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></article>`).join('')}</div></section>
   <section class="proof-ledger">${site.content.differentiators.slice(0, 3).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>
   <section class="practice-matrix">${site.content.services.slice(0, 6).map((s, i) => serviceRichCard(site, s, i, 'advisory route')).join('')}</section>`;
+}
+
+function professionalBriefingHome(site, pageItem) {
+  const psyche = site.designIntelligence || buildDesignIntelligence(site);
+  return `<section class="briefing-hero">
+    <div class="briefing-left reveal"><p class="eyebrow">${esc(psyche.visitorState)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book a confidential call')}</a></div>
+    <div class="briefing-dossier reveal">${site.content.processSteps.slice(0, 4).map((step, i) => `<article><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</div>
+  </section>
+  <section class="professional-proof-split"><figure class="reveal"><img src="${imageUrl(site, `confidential professional meeting ${site.generationSeed}`, 1100, 820)}" alt="${esc(site.brief.businessName)} advisory meeting"></figure><div class="reveal"><p class="eyebrow">How the page earns trust</p><h2>${esc(psyche.methodHeadline)}</h2><p>${esc(site.content.brandThesis)}</p>${heroLeadForm(site, 'Send a discreet enquiry')}</div></section>`;
+}
+
+function professionalAuthorityHome(site, pageItem) {
+  return `<section class="authority-hero">
+    <div class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p></div>
+    <div class="authority-card reveal"><h2>${esc(site.content.localProof)}</h2><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Speak to us')}</a></div>
+  </section>
+  <section class="authority-columns">${site.content.differentiators.slice(0, 3).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>
+  <section class="practice-matrix">${site.content.services.slice(0, 6).map((s, i) => serviceRichCard(site, s, i, 'specialist area')).join('')}</section>`;
 }
 
 function heroLeadForm(site, title = 'Start here') {
@@ -1277,6 +1440,13 @@ function softwareHome(site, pageItem) {
   <section class="feature-flow">${site.content.differentiators.slice(0, 4).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>`;
 }
 
+function softwareConversionHome(site, pageItem) {
+  return `<section class="software-demo-home">
+    <div class="reveal"><p class="eyebrow">Product walkthrough</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="hero-actions"><a class="button" href="contact.html">Request demo</a><a class="text-link" href="${alternateHref(site, 'pricing.html')}">See pricing</a></div></div>
+    <div class="product-preview reveal"><div class="preview-bar"></div>${site.content.differentiators.slice(0, 4).map((item) => `<article><strong>${esc(item.title)}</strong><span>${esc(item.text)}</span></article>`).join('')}</div>
+  </section>`;
+}
+
 function propertyHome(site, pageItem) {
   return `<section class="property-hero"><div class="reveal"><p class="eyebrow">${esc(site.brief.location)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p></div><form class="property-search reveal"><label>Area<input value="${esc(site.brief.location)}"></label><label>Budget<input placeholder="£"></label><button class="button">Search</button></form></section>
   <section class="property-listings">${site.content.services.slice(0, 4).map((s, i) => `<article class="reveal"><img src="${imageUrl(site, `property ${i} ${site.generationSeed}`, 800, 560)}" alt=""><h2>${esc(s.title)}</h2><p>${esc(s.description)}</p></article>`).join('')}</section>`;
@@ -1293,6 +1463,14 @@ function educationHome(site, pageItem) {
   <section class="education-proof-panel"><div class="reveal"><p class="eyebrow">Parent and student confidence</p><h2>${esc(site.content.brandThesis)}</h2><p>${esc(site.content.localProof)}</p></div><div>${site.content.faqs.slice(0, 3).map((faq) => `<details class="reveal"><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}</div></section>`;
 }
 
+function educationOutcomeHome(site, pageItem) {
+  return `<section class="learning-outcome-home">
+    <div class="reveal"><p class="eyebrow">Learning outcomes</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Enquire now')}</a></div>
+    <div class="outcome-ladder reveal">${site.content.processSteps.slice(0, 4).map((step, i) => `<article><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</div>
+    <figure class="reveal"><img src="${imageUrl(site, `premium tutoring focused study ${site.generationSeed}`, 900, 1100)}" alt="${esc(site.brief.businessName)} learning session"></figure>
+  </section>`;
+}
+
 function serviceRichCard(site, service, index, label = 'service') {
   const bullets = (service.bullets || []).slice(0, 3).map((bullet) => `<li>${esc(bullet)}</li>`).join('');
   const trustSignals = Array.isArray(site.content.trustSignals) ? site.content.trustSignals : [];
@@ -1302,6 +1480,14 @@ function serviceRichCard(site, service, index, label = 'service') {
 
 function serviceHome(site, pageItem) {
   return dynamicHomeEditorial(site, pageItem);
+}
+
+function localServiceHome(site, pageItem) {
+  return `<section class="local-service-home">
+    <div class="reveal"><p class="eyebrow">${esc(site.brief.location)} ${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="hero-actions"><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Get a quote')}</a><a class="text-link" href="services.html">Compare services</a></div></div>
+    <div class="local-proof-map reveal"><strong>${esc(site.brief.location)}</strong><p>${esc(site.content.localProof)}</p>${site.content.stats.slice(0, 3).map((stat) => `<span><b data-count="${stat.value}">0</b>${esc(stat.label)}</span>`).join('')}</div>
+  </section>
+  <section class="service-showcase">${site.content.services.slice(0, 5).map((s, i) => `<article class="service-row reveal"><div><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(s.title)}</h2><p>${esc(s.description)}</p></div><ul>${(s.bullets || []).slice(0, 3).map((b) => `<li>${esc(b)}</li>`).join('')}</ul></article>`).join('')}</section>`;
 }
 
 function dynamicHomeSplit(site, pageItem) {
@@ -1637,7 +1823,8 @@ function premiumCssV6(site) {
 .home-image-depth{display:grid;grid-template-columns:1.12fr .88fr;gap:var(--space-lg);align-items:center;background:var(--surface)}.home-image-depth figure{margin:0;display:grid;gap:.75rem}.home-image-depth img{width:100%;height:min(70vh,720px);object-fit:cover;border-radius:var(--radius-lg)}.home-image-depth figcaption{font-weight:900;color:var(--primary)}.home-keyword-depth{background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.home-keyword-depth .section-heading{max-width:1100px}.keyword-cloud{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:var(--space-md)}.keyword-cloud span{border:1px solid var(--line);padding:.55rem .8rem;border-radius:999px;font-weight:800;background:color-mix(in srgb,var(--secondary),var(--surface) 64%)}.home-benefit-board{display:grid;grid-template-columns:.68fr 1.32fr;gap:var(--space-lg);align-items:start}.home-benefit-board aside{position:sticky;top:110px}.home-benefit-board>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-md)}.home-benefit-board article{padding:var(--space-md)}.home-benefit-board article span{font-weight:900;color:var(--accent)}.home-service-depth{background:color-mix(in srgb,var(--secondary),var(--surface) 48%)}.home-service-depth ul{margin:1rem 0 0;padding-left:1.1rem}.home-proof-depth{display:grid;grid-template-columns:.8fr 1.2fr;gap:var(--space-lg);align-items:start;background:var(--ink);color:var(--surface)}.stats-depth{display:grid;grid-template-columns:repeat(3,1fr);gap:0}.stats-depth article{background:transparent;color:inherit;border-color:color-mix(in srgb,var(--surface),transparent 72%);border-radius:0}.stats-depth strong{display:block;font:800 clamp(2.2rem,5vw,5rem)/1 var(--font-display)}.home-proof-depth blockquote{background:color-mix(in srgb,var(--surface),transparent 90%);color:var(--surface);border-color:color-mix(in srgb,var(--surface),transparent 70%)}.home-faq-depth{display:grid;grid-template-columns:.7fr 1.3fr;gap:var(--space-lg);align-items:start}.faq-columns{columns:2 320px;column-gap:var(--space-md)}.faq-columns details{break-inside:avoid;margin:0 0 var(--space-md);padding:1rem}.home-final-cta{border-top:1px solid var(--line)}
 .course-grid article h2,.premium-list article h2,.generic-mosaic article h2,.cards article h2,.service-rich-card h2,.proof-ledger article h2,.practice-matrix article h2{font-size:clamp(1.45rem,2vw,2.35rem);line-height:1.08;overflow-wrap:break-word}.course-grid article p,.premium-list article p,.generic-mosaic article p,.cards article p,.service-rich-card p,.proof-ledger article p,.practice-matrix article p{font-size:clamp(1rem,1.08vw,1.12rem);line-height:1.72}.premium-list article,.proof-ledger article,.practice-matrix article,.feature-flow article,.cards article,.service-rich-card{border:0!important;box-shadow:0 20px 60px color-mix(in srgb,var(--ink),transparent 92%);background:color-mix(in srgb,var(--surface),var(--secondary) 10%)}.proof-ledger,.practice-matrix,.feature-flow{gap:var(--space-md)}.service-rich-card{display:grid;gap:.95rem;align-content:start;min-height:360px;padding:clamp(1.25rem,2.4vw,2.1rem)}.service-rich-card>span{font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--primary)}.service-rich-card ul{margin:.2rem 0 0;padding-left:1.1rem;display:grid;gap:.45rem}.service-rich-card .card-proof{margin-top:auto;padding-top:.8rem;border-top:1px solid color-mix(in srgb,var(--ink),transparent 90%);font-weight:800;color:var(--primary)}.product-signal-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.product-signal-board article{border:0;padding:var(--space-md);background:color-mix(in srgb,var(--surface),transparent 8%);box-shadow:0 18px 50px color-mix(in srgb,var(--ink),transparent 88%)}.product-signal-board h2{font-size:clamp(1.35rem,2.2vw,2.4rem)}.product-signal-board span{font-weight:900;color:var(--accent)}.education-proof-panel{display:grid;grid-template-columns:.86fr 1.14fr;gap:var(--space-lg);background:var(--secondary)}.education-proof-panel>div:last-child{display:grid;gap:var(--space-sm)}.education-proof-panel details{padding:1rem}.motion-title{word-spacing:normal}.motion-title .motion-word{margin-right:.18em}.motion-title .motion-word:last-of-type{margin-right:0}
 footer.footer-minimal,footer.footer-utility,footer.footer-doormat,footer.footer-mega,footer.footer-cta,footer.footer-hub,footer.footer-product,footer.footer-contextual,footer.footer-invisible{align-items:start}footer nav{display:flex;gap:.75rem;flex-wrap:wrap}footer h2{font-size:clamp(2rem,4vw,4rem)}footer h3{font-size:1rem;text-transform:uppercase;letter-spacing:.12em}.footer-legal{font-size:.9rem;color:var(--muted)}.footer-minimal{display:flex;justify-content:space-between;gap:1rem}.footer-utility{display:grid;grid-template-columns:1fr auto;gap:var(--space-md);background:var(--secondary)}.footer-doormat{display:grid;grid-template-columns:.9fr 1.2fr auto;gap:var(--space-lg)}.footer-doormat nav:not(.footer-legal){align-content:start}.footer-mega{display:grid;grid-template-columns:1.2fr .7fr .8fr .9fr;gap:var(--space-lg);background:var(--ink);color:var(--surface)}.footer-mega a,.footer-mega .footer-legal,.footer-mega address{color:color-mix(in srgb,var(--surface),transparent 18%)}.footer-mega .newsletter{grid-column:1/3}.footer-mega .footer-legal{grid-column:3/5}.footer-statement{max-width:820px}.footer-statement p{font:500 clamp(1.55rem,3vw,3.5rem)/1.08 var(--font-display);margin:.5rem 0}.footer-cta{display:grid;grid-template-columns:1.2fr .8fr auto;gap:var(--space-lg);background:var(--primary);color:#fff}.footer-cta .eyebrow,.footer-cta .footer-legal,.footer-cta a{color:#fff}.footer-hub{display:grid;grid-template-columns:1fr .7fr .7fr .7fr;gap:var(--space-lg)}.footer-product{display:grid;grid-template-columns:.7fr 1.3fr;gap:var(--space-lg);background:color-mix(in srgb,var(--secondary),var(--surface) 38%)}.footer-product-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.footer-product-grid article{padding:1rem;min-height:210px}.footer-product .footer-legal{grid-column:1/-1}.footer-contextual{display:grid;grid-template-columns:1fr .9fr .8fr .7fr;gap:var(--space-lg)}.footer-invisible{padding-top:1rem;padding-bottom:1rem;border-top:0;background:transparent}.footer-invisible .footer-legal{width:100%;justify-content:center}.footer-proof{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem}.footer-proof span{display:grid;border-top:1px solid currentColor;padding-top:.75rem}.footer-proof strong{font:800 clamp(2rem,4vw,4rem)/1 var(--font-display)}.newsletter{display:grid;gap:.65rem;min-width:min(100%,320px)}address{font-style:normal;color:var(--muted)}
-[data-motion-ready] .reveal{will-change:transform,opacity;transition-delay:var(--reveal-delay,0ms)}[data-motion-ready] .reveal:nth-child(2n){--reveal-delay:70ms}[data-motion-ready] .reveal:nth-child(3n){--reveal-delay:140ms}.motion-word{display:inline-block;opacity:0;transform:translateY(.75em);transition:opacity .65s ease,transform .65s cubic-bezier(.2,.8,.2,1);transition-delay:calc(var(--word-index,0)*42ms)}.visible .motion-word,.motion-title.visible .motion-word{opacity:1;transform:none}.motion-media{overflow:hidden;transform:translate3d(0,var(--motion-y,0),0);transition:filter .45s ease}.motion-media img,.motion-media{will-change:transform}.motion-media img{transform:scale(1.055);transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}.motion-media.visible img,.visible.motion-media img{transform:scale(1)}.parallax-soft{transform:translate3d(0,var(--parallax-y,0),0)}.parallax-deep{transform:translate3d(0,var(--parallax-y-deep,0),0)}.section-inview{--section-progress:1}.site-header{transition:transform .35s ease,background .35s ease}.site-header.header-hidden{transform:translateY(-105%)}.magnetic-hover{transition:transform .22s ease}.magnetic-hover:hover{transform:translateY(-3px)}.service-row.active{background:color-mix(in srgb,var(--secondary),transparent 60%)}.scroll-progress{box-shadow:0 0 18px color-mix(in srgb,var(--accent),transparent 25%)}h1{font-size:clamp(2.8rem,5.2vw,6.1rem);line-height:1.02;word-spacing:.08em}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1{font-size:clamp(3rem,5.9vw,6.3rem);line-height:1.01;max-width:880px}.professional-hero .motion-word{margin-right:.12em}.professional-hero .motion-word:last-child{margin-right:0}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal,.motion-word{opacity:1!important;transform:none!important}.parallax-soft,.parallax-deep,.motion-media{transform:none!important}}@media(max-width:1050px){.header-split,.header-editorial,.footer-utility,.footer-doormat,.footer-mega,.footer-cta,.footer-hub,.footer-product,.footer-contextual,.story-split-page,.home-image-depth,.home-benefit-board,.home-proof-depth,.home-faq-depth,.education-proof-panel,.product-signal-board{grid-template-columns:1fr}.footer-mega .newsletter,.footer-mega .footer-legal,.footer-product .footer-legal{grid-column:auto}.header-split .brand{justify-self:start}.header-editorial>p{display:none}.story-split-page img{height:460px;order:-1}.home-benefit-board aside{position:static}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid{grid-template-columns:repeat(2,1fr)}.home-image-depth img{height:460px}}@media(max-width:680px){.story-split-page h1{font-size:clamp(2.2rem,14vw,3.7rem)}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1,h1{font-size:clamp(2.45rem,12vw,4rem);line-height:1.04}.story-split-page img{height:340px}.site-header{align-items:flex-start}.header-brand-row,.header-actions,.footer-minimal{align-items:flex-start;flex-direction:column}.brand{max-width:100%}.theme-toggle{width:44px;height:44px}.brand-logo-hero{height:64px;max-width:220px}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid{grid-template-columns:1fr}.faq-columns{columns:1}.home-image-depth img{height:340px}}`;
+.briefing-hero{display:grid;grid-template-columns:.86fr 1.14fr;gap:var(--space-lg);align-items:stretch;min-height:calc(100vh - 84px);background:var(--ink);color:var(--surface)}.briefing-left{display:grid;align-content:center}.briefing-left p{color:color-mix(in srgb,var(--surface),transparent 18%)}.briefing-dossier{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;align-content:center}.briefing-dossier article{border:0;background:color-mix(in srgb,var(--surface),transparent 92%);color:var(--surface);box-shadow:none;padding:clamp(1rem,2.4vw,2rem)}.briefing-dossier h2{font-size:clamp(1.35rem,2vw,2.35rem)}.professional-proof-split{display:grid;grid-template-columns:.9fr 1fr;gap:var(--space-lg);align-items:center}.professional-proof-split img{height:680px;width:100%;object-fit:cover}.authority-hero{display:grid;grid-template-columns:1.1fr .72fr;gap:var(--space-lg);align-items:end;min-height:72vh;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--secondary),var(--surface) 55%))}.authority-card{padding:var(--space-lg);background:var(--ink);color:var(--surface);border:0;box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 82%)}.authority-card h2{font-size:clamp(1.55rem,2.45vw,3rem)}.authority-columns{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md)}.authority-columns article{border:0;box-shadow:none;background:transparent;border-top:1px solid color-mix(in srgb,var(--ink),transparent 84%);border-radius:0}.booking-home{display:grid;grid-template-columns:1fr minmax(320px,.54fr) .72fr;gap:var(--space-lg);align-items:center;background:var(--ink);color:var(--surface)}.booking-home figure img{height:680px;width:100%;object-fit:cover}.booking-card{display:grid;gap:.8rem;padding:var(--space-md);background:var(--surface);color:var(--ink);box-shadow:0 30px 90px color-mix(in srgb,#000,transparent 78%)}.care-trust-home{display:grid;grid-template-columns:.82fr 1fr .72fr;gap:var(--space-lg);align-items:center;background:color-mix(in srgb,var(--secondary),var(--surface) 54%)}.care-trust-home figure img{height:680px;width:100%;object-fit:cover}.care-trust-panel{padding:var(--space-md);border:0;box-shadow:0 24px 80px color-mix(in srgb,var(--ink),transparent 88%)}.software-demo-home{display:grid;grid-template-columns:.78fr 1.22fr;gap:var(--space-lg);align-items:center;min-height:calc(100vh - 84px);background:var(--ink);color:var(--surface)}.product-preview{display:grid;gap:1rem;padding:var(--space-md);background:linear-gradient(145deg,color-mix(in srgb,var(--surface),transparent 88%),color-mix(in srgb,var(--primary),transparent 78%));box-shadow:0 40px 100px color-mix(in srgb,#000,transparent 72%)}.preview-bar{height:14px;width:38%;border-radius:999px;background:color-mix(in srgb,var(--surface),transparent 35%)}.product-preview article{display:grid;grid-template-columns:.42fr 1fr;gap:1rem;border:0;background:color-mix(in srgb,var(--surface),transparent 92%);color:var(--surface)}.learning-outcome-home{display:grid;grid-template-columns:.85fr .78fr .72fr;gap:var(--space-lg);align-items:center;background:var(--secondary)}.learning-outcome-home figure img{height:680px;width:100%;object-fit:cover}.outcome-ladder{display:grid;gap:.85rem}.outcome-ladder article{border:0;background:var(--surface);box-shadow:0 18px 60px color-mix(in srgb,var(--ink),transparent 90%)}.local-service-home{display:grid;grid-template-columns:1fr .72fr;gap:var(--space-lg);align-items:end;min-height:72vh;background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 48%),var(--surface))}.local-proof-map{display:grid;gap:.85rem;padding:var(--space-lg);background:var(--ink);color:var(--surface);box-shadow:0 30px 100px color-mix(in srgb,var(--ink),transparent 78%)}.local-proof-map strong{font:800 clamp(2rem,5vw,5rem)/1 var(--font-display)}.local-proof-map span{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid color-mix(in srgb,var(--surface),transparent 72%);padding-top:.8rem}.local-proof-map b{font-size:1.6rem}
+[data-motion-ready] .reveal{will-change:transform,opacity;transition-delay:var(--reveal-delay,0ms)}[data-motion-ready] .reveal:nth-child(2n){--reveal-delay:70ms}[data-motion-ready] .reveal:nth-child(3n){--reveal-delay:140ms}.motion-word{display:inline-block;opacity:0;transform:translateY(.75em);transition:opacity .65s ease,transform .65s cubic-bezier(.2,.8,.2,1);transition-delay:calc(var(--word-index,0)*42ms)}.visible .motion-word,.motion-title.visible .motion-word{opacity:1;transform:none}.motion-media{overflow:hidden;transform:translate3d(0,var(--motion-y,0),0);transition:filter .45s ease}.motion-media img,.motion-media{will-change:transform}.motion-media img{transform:scale(1.055);transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}.motion-media.visible img,.visible.motion-media img{transform:scale(1)}.parallax-soft{transform:translate3d(0,var(--parallax-y,0),0)}.parallax-deep{transform:translate3d(0,var(--parallax-y-deep,0),0)}.section-inview{--section-progress:1}.site-header{transition:transform .35s ease,background .35s ease}.site-header.header-hidden{transform:translateY(-105%)}.magnetic-hover{transition:transform .22s ease}.magnetic-hover:hover{transform:translateY(-3px)}.service-row.active{background:color-mix(in srgb,var(--secondary),transparent 60%)}.scroll-progress{box-shadow:0 0 18px color-mix(in srgb,var(--accent),transparent 25%)}h1{font-size:clamp(2.8rem,5.2vw,6.1rem);line-height:1.02;word-spacing:.08em}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1{font-size:clamp(3rem,5.9vw,6.3rem);line-height:1.01;max-width:880px}.professional-hero .motion-word{margin-right:.12em}.professional-hero .motion-word:last-child{margin-right:0}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal,.motion-word{opacity:1!important;transform:none!important}.parallax-soft,.parallax-deep,.motion-media{transform:none!important}}@media(max-width:1050px){.header-split,.header-editorial,.footer-utility,.footer-doormat,.footer-mega,.footer-cta,.footer-hub,.footer-product,.footer-contextual,.story-split-page,.home-image-depth,.home-benefit-board,.home-proof-depth,.home-faq-depth,.education-proof-panel,.product-signal-board,.briefing-hero,.professional-proof-split,.authority-hero,.booking-home,.care-trust-home,.software-demo-home,.learning-outcome-home,.local-service-home{grid-template-columns:1fr}.footer-mega .newsletter,.footer-mega .footer-legal,.footer-product .footer-legal{grid-column:auto}.header-split .brand{justify-self:start}.header-editorial>p{display:none}.story-split-page img{height:460px;order:-1}.home-benefit-board aside{position:static}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:repeat(2,1fr)}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:460px}}@media(max-width:680px){.story-split-page h1{font-size:clamp(2.2rem,14vw,3.7rem)}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1,h1{font-size:clamp(2.45rem,12vw,4rem);line-height:1.04}.story-split-page img{height:340px}.site-header{align-items:flex-start}.header-brand-row,.header-actions,.footer-minimal{align-items:flex-start;flex-direction:column}.brand{max-width:100%}.theme-toggle{width:44px;height:44px}.brand-logo-hero{height:64px;max-width:220px}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:1fr}.faq-columns{columns:1}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:340px}}`;
 }
 
 function premiumJsV2() {

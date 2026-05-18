@@ -546,13 +546,13 @@ function inferReviewNature(lower, isShoe) {
   if (isShoe || /shop|retail|e-?commerce|store|product|fashion/.test(lower)) return 'commerce';
   if (/restaurant|cafe|bar|bakery|takeaway|menu|reservation/.test(lower)) return 'hospitality';
   if (/clinic|dental|physio|health|therapy|medical|wellness|salon|spa/.test(lower)) return 'care';
+  if (/school|course|education|academy|tutor|tuition|student|gcse|a-level|maths|english|exam|revision|training/.test(lower)) return 'education';
   if (/law|legal|solicitor|accountant|finance|consult/.test(lower)) return 'professional';
   if (/gym|fitness|trainer|yoga|pilates/.test(lower)) return 'fitness';
   if (/portfolio|photography|artist|designer|creative/.test(lower)) return 'portfolio';
   if (/saas|software|app|platform|dashboard|ai|automation/.test(lower)) return 'software';
   if (/estate|property|letting|homes|apartments/.test(lower)) return 'property';
   if (/event|conference|festival|wedding|venue|ticket/.test(lower)) return 'event';
-  if (/school|course|education|academy|tutor|training/.test(lower)) return 'education';
   return 'service';
 }
 
