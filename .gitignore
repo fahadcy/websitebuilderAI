@@ -1,0 +1,9 @@
+node_modules/
+data/
+uploads/
+generated-sites/
+.env
+npm-debug.log*
+*.log
+package.zip
+.DS_Store

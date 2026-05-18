@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Generating Website</title>
+  <link rel="stylesheet" href="/assets/css/builder.css">
+</head>
+<body class="generate-body">
+  <main class="generation-shell">
+    <section class="generation-hero">
+      <p class="mono-kicker">Production build pipeline</p>
+      <h1>Generating your website</h1>
+      <p id="status">Connecting to the generation engine...</p>
+      <div class="generation-meter">
+        <progress id="progress" max="100" value="0"></progress>
+        <div class="timer-grid">
+          <span>Elapsed <strong id="elapsed-time">0s</strong></span>
+          <span>Approx left <strong id="remaining-time">Calculating</strong></span>
+          <span>Progress <strong id="progress-label">0%</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="generation-layout">
+      <ol class="steps detailed-steps" id="steps">
+        <li data-key="prompt"><strong>Analysing your prompt</strong><span>Extracting business type, audience, location, offer, tone, conversion goal, and required pages.</span></li>
+        <li data-key="strategy"><strong>Creating text and page strategy</strong><span>Choosing page structure, section order, client questions, content depth, and conversion flow.</span></li>
+        <li data-key="keywords"><strong>Building SEO keyword map</strong><span>Finding primary, secondary, local, service, and long-tail keyword families before copy is written.</span></li>
+        <li data-key="copy"><strong>Infusing keywords into authentic content</strong><span>Writing natural copy with keyword density targets, avoiding stuffing and generic filler.</span></li>
+        <li data-key="design"><strong>Designing layout and colour palette</strong><span>Creating typography, spacing, header/footer variants, visual rhythm, and responsive design tokens.</span></li>
+        <li data-key="images"><strong>Generating AI image assets</strong><span>Planning image roles, generating or selecting visuals, checking placement and fallback behaviour.</span></li>
+        <li data-key="animation"><strong>Building animated layouts</strong><span>Adding parallax, reveal motion, counters, accordions, carousels, hover states, and mobile behaviour.</span></li>
+        <li data-key="cms"><strong>Setting up admin panel</strong><span>Creating CMS screens, contact capture, newsletter capture, settings, SEO controls, and secured forms.</span></li>
+        <li data-key="seo"><strong>Configuring SEO and keyword density report</strong><span>Writing meta tags, schema, sitemap, robots, RSS, canonical URLs, and the keyword report.</span></li>
+        <li data-key="qa"><strong>Running Reality Check Agent</strong><span>Checking broken links, missing files, security signals, UX, browser renderability, and package readiness.</span></li>
+        <li data-key="package"><strong>Finalising and packaging</strong><span>Building the ZIP, deployment notes, README, style guide, and client handoff assets.</span></li>
+      </ol>
+
+      <aside class="generation-insights">
+        <article>
+          <span>Currently working on</span>
+          <strong id="current-phase">Starting engine</strong>
+          <p id="phase-detail">The builder will stream each production step here.</p>
+        </article>
+        <article>
+          <span>SEO keyword infusion</span>
+          <ul id="keyword-details">
+            <li>Primary keyword family</li>
+            <li>Secondary service keywords</li>
+            <li>Local search modifiers</li>
+            <li>Density check and report</li>
+          </ul>
+        </article>
+        <article>
+          <span>Quality gate</span>
+          <p>Before the ZIP is offered, the Reality Check Agent reviews architecture, content, SEO, CMS, security, links, and browser render signals.</p>
+        </article>
+      </aside>
+    </section>
+
+    <div id="actions" class="actions"></div>
+  </main>
+  <script src="/assets/js/generate.js"></script>
+</body>
+</html>

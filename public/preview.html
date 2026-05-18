@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Preview</title>
+  <link rel="stylesheet" href="/assets/css/builder.css">
+</head>
+<body class="preview-body">
+  <header class="preview-bar">
+    <strong id="site-name">Preview</strong>
+    <div>
+      <button data-size="100%">Desktop</button>
+      <button data-size="768px">Tablet</button>
+      <button data-size="390px">Mobile</button>
+      <button id="recheck" type="button">Reality Check</button>
+      <button id="open-feedback" type="button">Teach Builder</button>
+      <a id="edit" class="button">Visual Editor</a>
+      <a id="download" class="button">Download ZIP</a>
+      <a id="deploy" class="button">Deploy</a>
+    </div>
+  </header>
+
+  <aside class="reality-panel" id="reality-panel" hidden>
+    <button id="close-reality" class="reality-close" type="button" aria-label="Close Reality Check panel">x</button>
+    <div>
+      <span>Reality Check Agent</span>
+      <strong id="reality-score">Checking...</strong>
+      <p id="reality-summary">Loading quality report.</p>
+    </div>
+    <ul id="reality-issues"></ul>
+  </aside>
+
+  <aside class="feedback-panel" id="feedback-panel" hidden>
+    <button id="close-feedback" class="reality-close" type="button" aria-label="Close feedback panel">x</button>
+    <div>
+      <span>Learning loop</span>
+      <strong>Teach the builder</strong>
+      <p>Rate this generated site. Future generations will use these lessons by industry and globally.</p>
+    </div>
+    <form id="feedback-form">
+      <label>Rating
+        <select name="rating">
+          <option value="5">5 - Excellent</option>
+          <option value="4">4 - Good</option>
+          <option value="3">3 - Needs work</option>
+          <option value="2">2 - Poor</option>
+          <option value="1">1 - Unusable</option>
+        </select>
+      </label>
+      <label>Area
+        <select name="category">
+          <option value="design">Design quality</option>
+          <option value="content">Content and copy</option>
+          <option value="images">Images and placement</option>
+          <option value="layout">Layout and structure</option>
+          <option value="seo">SEO and keywords</option>
+          <option value="cms">CMS/admin</option>
+          <option value="general">General</option>
+        </select>
+      </label>
+      <label>What worked well?
+        <textarea name="positives" placeholder="Header felt premium, footer had useful information, copy was convincing..."></textarea>
+      </label>
+      <label>What should be avoided or improved?
+        <textarea name="negatives" placeholder="Hero text too large, images irrelevant, pages looked too similar..."></textarea>
+      </label>
+      <label>Specific change for future sites
+        <textarea name="suggestedChanges" placeholder="For advisory sites, use calmer typography and fewer card borders..."></textarea>
+      </label>
+      <button>Save learning</button>
+      <p id="feedback-status"></p>
+    </form>
+  </aside>
+
+  <main class="preview-frame-wrap">
+    <iframe id="frame" title="Generated website preview"></iframe>
+  </main>
+  <script src="/assets/js/preview.js"></script>
+</body>
+</html>

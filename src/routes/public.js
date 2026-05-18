@@ -1,0 +1,480 @@
+import express from 'express';
+import fs from 'node:fs';
+import dns from 'node:dns/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import multer from 'multer';
+import { jobQueue } from '../queue/jobQueue.js';
+import { db } from '../db/database.js';
+import { generationLimiter, requireCsrf } from '../middleware/security.js';
+import { reviewPrompt } from '../ai/openaiClient.js';
+import { searchCompaniesHouse } from '../integrations/companiesHouse.js';
+import { createZip } from '../packager/zipper.js';
+import { runRealityCheck, realityCheckMarkdown } from '../quality/realityCheck.js';
+import { recordSiteFeedback, getLearningContext } from '../learning/feedbackMemory.js';
+
+export const publicRouter = express.Router();
+const root = process.cwd();
+const uploadDir = path.join(root, 'uploads', 'logos');
+
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${crypto.randomUUID()}${ext}`);
+    }
+  }),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowed = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg']);
+    const mimeOk = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.mimetype);
+    if (!allowed.has(ext) || !mimeOk) return cb(new Error('Logo must be a PNG, JPG, WebP, or SVG file.'));
+    cb(null, true);
+  }
+});
+
+const editorUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 12 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowed = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg']);
+    const mimeOk = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.mimetype);
+    if (!allowed.has(ext) || !mimeOk) return cb(new Error('Image must be PNG, JPG, WebP, or SVG.'));
+    cb(null, true);
+  }
+});
+
+publicRouter.get('/', (req, res) => res.sendFile(path.join(root, 'public', 'index.html')));
+
+publicRouter.post('/generate', generationLimiter, handleLogoUpload, requireCsrf, (req, res) => {
+  const prompt = String(req.body.prompt || '').trim().slice(0, 1000);
+  if (prompt.length < 10) return res.status(400).send('Prompt must be at least 10 characters.');
+  const domainName = normalizeDomain(req.body.domainName || '');
+  const logoPalette = parsePalette(req.body.logoPalette);
+  const metadata = {
+    domainName,
+    logoPalette,
+    blueprint: parseBlueprint(req.body.siteBlueprint),
+    generationMatrix: parseGenerationMatrix(req.body.generationMatrix),
+    imagePlan: parseImagePlan(req.body.imagePlan),
+    generateImages: req.body.generateImages !== 'false',
+    companyHouse: parseCompanyHouse(req.body.companyHouse),
+    showCompanyHouse: req.body.showCompanyHouse === 'true',
+    clientAnswers: parseClientAnswers(req.body.clientAnswers),
+    fontPreference: sanitizeFontPreference(req.body.fontPreference),
+    logoPath: req.file?.path || null,
+    logoOriginalName: req.file?.originalname || null
+  };
+  const specifications = [
+    req.body.audience ? `Ideal audience: ${String(req.body.audience).slice(0, 240)}.` : '',
+    req.body.positioning ? `Brand positioning: ${String(req.body.positioning).slice(0, 300)}.` : '',
+    req.body.stylePreference ? `Design style preference: ${String(req.body.stylePreference).slice(0, 180)}.` : '',
+    metadata.fontPreference ? `Preferred font direction: ${metadata.fontPreference}. Use it if it suits the brand and keep typography professional.` : '',
+    req.body.mustHave ? `Must-have details and sections: ${String(req.body.mustHave).slice(0, 360)}.` : ''
+  ].filter(Boolean);
+  const enrichedPrompt = [
+    prompt,
+    ...specifications,
+    domainName ? `Preferred domain: ${domainName}.` : '',
+    metadata.blueprint?.internalPrompt ? `Approved site blueprint: ${metadata.blueprint.internalPrompt}` : '',
+    metadata.blueprint?.pages?.length ? `Approved pages: ${metadata.blueprint.pages.map((page) => `${page.title} (${page.purpose})`).join('; ')}` : '',
+    metadata.generationMatrix?.summary ? `Approved generation matrix: ${metadata.generationMatrix.summary}` : '',
+    metadata.imagePlan?.length ? `Approved image plan:\n${metadata.imagePlan.map((asset) => `${asset.id}/${asset.purpose}: ${asset.prompt}`).join('\n')}` : '',
+    metadata.companyHouse?.companyName ? `Companies House selected: ${metadata.companyHouse.companyName}, company number ${metadata.companyHouse.companyNumber || 'unknown'}, registered office ${metadata.companyHouse.address || 'unknown'}. Show official company data on generated website: ${metadata.showCompanyHouse ? 'yes' : 'no'}.` : '',
+    metadata.clientAnswers?.length ? `Client answers:\n${metadata.clientAnswers.map((answer) => `${answer.label}: ${answer.value}`).join('\n')}` : '',
+    logoPalette ? `Use this logo-derived palette: primary ${logoPalette.primary}, secondary ${logoPalette.secondary}, accent ${logoPalette.accent}.` : ''
+  ].filter(Boolean).join('\n');
+  const job = jobQueue.create(enrichedPrompt, req.ip, metadata);
+  res.redirect(`/generate?job=${job.id}`);
+});
+
+function handleLogoUpload(req, res, next) {
+  logoUpload.single('logo')(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).send(friendlyUploadError('Logo file is too large', 'Please upload a PNG, JPG, WebP, or SVG logo up to 8MB. You can also remove the logo and generate the site without it.'));
+    }
+    if (error instanceof multer.MulterError) {
+      return res.status(400).send(friendlyUploadError('Logo upload failed', 'Please upload one valid logo file, or remove the logo and try again.'));
+    }
+    return res.status(400).send(friendlyUploadError('Logo file type is not supported', error.message || 'Please upload a PNG, JPG, WebP, or SVG logo.'));
+  });
+}
+
+function friendlyUploadError(title, message) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><link rel="stylesheet" href="/assets/css/builder.css"></head><body><main class="shell"><div class="panel"><h1>${title}</h1><p>${message}</p><p><a class="button" href="/">Back to builder</a></p></div></main></body></html>`;
+}
+
+publicRouter.post('/api/prompt/review', requireCsrf, async (req, res) => {
+  const prompt = String(req.body.prompt || '').trim().slice(0, 1600);
+  if (prompt.length < 5) return res.status(400).json({ error: 'Enter a prompt first.' });
+  const review = await reviewPrompt(prompt);
+  res.json(review);
+});
+
+publicRouter.get('/api/company-house/search', async (req, res) => {
+  try {
+    const result = await searchCompaniesHouse(req.query.q || '');
+    res.json(result);
+  } catch (error) {
+    res.status(502).json({ configured: Boolean(process.env.COMPANIES_HOUSE_API_KEY), items: [], message: error.message || 'Companies House search failed.' });
+  }
+});
+
+publicRouter.get('/generate', (req, res) => res.sendFile(path.join(root, 'public', 'generate.html')));
+
+publicRouter.get('/events/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  const existing = jobQueue.get(jobId);
+  if (existing) send(existing);
+  const listener = (payload) => send(payload);
+  jobQueue.on(jobId, listener);
+  req.on('close', () => jobQueue.off(jobId, listener));
+});
+
+publicRouter.get('/preview/:siteId', (req, res) => {
+  const site = db.prepare('SELECT * FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site) return res.status(404).send('Site not found');
+  res.sendFile(path.join(root, 'public', 'preview.html'));
+});
+
+publicRouter.get('/editor/:siteId', (req, res) => {
+  const site = db.prepare('SELECT * FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site) return res.status(404).send('Site not found');
+  res.sendFile(path.join(root, 'public', 'editor.html'));
+});
+
+publicRouter.get('/api/editor/:siteId/pages', (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const files = fs.readdirSync(site.output_path)
+    .filter((file) => file.endsWith('.html') && file !== 'style-guide.html')
+    .sort((a, b) => (a === 'index.html' ? -1 : b === 'index.html' ? 1 : a.localeCompare(b)));
+  res.json({ site: { id: site.id, businessName: site.business_name }, pages: files });
+});
+
+publicRouter.get('/api/editor/:siteId/page', (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const file = safeEditorFile(req.query.file || 'index.html');
+  const htmlPath = path.join(site.output_path, file);
+  if (!fs.existsSync(htmlPath)) return res.status(404).json({ error: 'Page not found' });
+  res.json({ file, html: fs.readFileSync(htmlPath, 'utf8') });
+});
+
+publicRouter.post('/api/editor/:siteId/page', requireCsrf, async (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const file = safeEditorFile(req.body.file || 'index.html');
+  const html = String(req.body.html || '');
+  if (!html.includes('<html') || html.length > 5_000_000) return res.status(400).json({ error: 'Invalid HTML payload.' });
+  const htmlPath = path.join(site.output_path, file);
+  if (!isWithin(site.output_path, htmlPath) || !fs.existsSync(htmlPath)) return res.status(404).json({ error: 'Page not found' });
+  fs.writeFileSync(htmlPath, html, 'utf8');
+  const audit = await auditAndPersist(site);
+  const zipPath = await createZip(site.output_path, site.id);
+  db.prepare('UPDATE generated_sites SET zip_path = ? WHERE id = ?').run(zipPath, site.id);
+  res.json({ ok: true, file, zipPath, realityCheck: publicAuditSummary(audit) });
+});
+
+publicRouter.post('/api/editor/:siteId/upload', requireCsrf, (req, res) => {
+  editorUpload.single('image')(req, res, (error) => {
+    if (error) return res.status(400).json({ error: error.message || 'Image upload failed.' });
+    const site = getGeneratedSite(req.params.siteId);
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    if (!req.file) return res.status(400).json({ error: 'Choose an image first.' });
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const dir = path.join(site.output_path, 'assets', 'images', 'editor');
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${crypto.randomUUID()}${ext}`;
+    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+    res.json({ url: `assets/images/editor/${filename}` });
+  });
+});
+
+publicRouter.get('/api/sites/:siteId', (req, res) => {
+  const site = db.prepare('SELECT id, business_name, industry, prompt, status, domain_name, deployment_status, deployment_target, reality_check_score, reality_check_verdict, created_at FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Not found' });
+  res.json(site);
+});
+
+publicRouter.get('/api/sites/:siteId/reality-check', (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const report = parseRealityReport(site.reality_check_report);
+  if (!report) return res.json({ score: null, verdict: 'not_run', summary: 'Reality Check Agent has not run yet.', blockers: 0, warnings: 0, checks: [] });
+  res.json(publicAuditSummary(report));
+});
+
+publicRouter.post('/api/sites/:siteId/reality-check', requireCsrf, async (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const audit = await auditAndPersist(site);
+  const zipPath = await createZip(site.output_path, site.id);
+  db.prepare('UPDATE generated_sites SET zip_path = ? WHERE id = ?').run(zipPath, site.id);
+  res.json(publicAuditSummary(audit));
+});
+
+publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, (req, res) => {
+  const site = getGeneratedSite(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Site not found' });
+  const saved = recordSiteFeedback(site.id, req.body || {});
+  if (!saved) return res.status(404).json({ error: 'Site not found' });
+  const learning = getLearningContext({ industry: site.industry, prompt: site.prompt });
+  res.json({ ok: true, feedbackId: saved.id, learningRules: learning.rules.length, learning });
+});
+
+publicRouter.get('/api/domain/check', async (req, res) => {
+  const domain = normalizeDomain(req.query.domain || '');
+  if (!domain) return res.status(400).json({ domain: '', status: 'invalid', message: 'Enter a valid domain such as example.co.uk.' });
+  if (!isValidDomain(domain)) {
+    return res.status(400).json({ domain, status: 'invalid', available: false, message: 'Use a complete domain, for example northline.co.uk.', suggestions: suggestDomains(domain) });
+  }
+  if (domain.endsWith('.test') || domain.endsWith('.demo')) {
+    return res.json({
+      domain,
+      status: 'available',
+      available: true,
+      message: `${domain} is available for demo purposes and ready to attach after purchase.`,
+      readiness: domainReadiness(domain, 'available'),
+      suggestions: suggestDomains(domain)
+    });
+  }
+  try {
+    const records = await Promise.any([
+      dns.resolve4(domain),
+      dns.resolve6(domain),
+      dns.resolveMx(domain),
+      dns.resolveNs(domain)
+    ]);
+    res.json({
+      domain,
+      status: 'registered',
+      available: false,
+      message: `${domain} appears to be registered because DNS records were found. You can still attach this site if you own it.`,
+      recordsFound: records.length,
+      readiness: domainReadiness(domain, 'registered'),
+      suggestions: suggestDomains(domain)
+    });
+  } catch (error) {
+    res.json({
+      domain,
+      status: 'available',
+      available: true,
+      message: `${domain} does not currently resolve. For demo purposes, mark it as available and ready to connect after registrar purchase.`,
+      readiness: domainReadiness(domain, 'available'),
+      suggestions: suggestDomains(domain)
+    });
+  }
+});
+
+publicRouter.get('/deploy/:siteId', (req, res) => {
+  const site = db.prepare('SELECT * FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site) return res.status(404).send('Site not found');
+  res.sendFile(path.join(root, 'public', 'deploy.html'));
+});
+
+publicRouter.post('/deploy/:siteId', requireCsrf, (req, res) => {
+  const target = String(req.body.target || 'manual').slice(0, 80);
+  db.prepare('UPDATE generated_sites SET deployment_target = ?, deployment_status = ? WHERE id = ?').run(target, 'ready_for_operator', req.params.siteId);
+  res.redirect(`/deploy/${req.params.siteId}?target=${encodeURIComponent(target)}`);
+});
+
+publicRouter.get('/download/:siteId', (req, res) => {
+  const site = db.prepare('SELECT * FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site || !fs.existsSync(site.zip_path)) return res.status(404).send('ZIP not found');
+  res.download(site.zip_path, `${site.id}.zip`);
+});
+
+publicRouter.get('/csrf', (req, res) => res.json({ csrfToken: req.session.csrfToken }));
+
+function normalizeDomain(value) {
+  return String(value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').replace(/[^a-z0-9.-]/g, '');
+}
+
+function isValidDomain(domain) {
+  return /^(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}$/.test(domain) && !domain.includes('..');
+}
+
+function getGeneratedSite(siteId) {
+  const site = db.prepare('SELECT * FROM generated_sites WHERE id = ?').get(String(siteId || ''));
+  if (!site || !site.output_path || !isWithin(path.join(root, 'generated-sites'), site.output_path)) return null;
+  return site;
+}
+
+function safeEditorFile(value) {
+  const file = String(value || 'index.html').replace(/\\/g, '/').split('/').pop();
+  if (!/^[a-z0-9-]+\.html$/i.test(file)) return 'index.html';
+  return file;
+}
+
+function isWithin(parent, target) {
+  const relative = path.relative(path.resolve(parent), path.resolve(target));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function auditAndPersist(site) {
+  const audit = await runRealityCheck(siteRecordToAuditSite(site), site.output_path);
+  fs.writeFileSync(path.join(site.output_path, 'reality-check-report.md'), realityCheckMarkdown(siteRecordToAuditSite(site), audit), 'utf8');
+  db.prepare('UPDATE generated_sites SET reality_check_score = ?, reality_check_report = ?, reality_check_verdict = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(audit.score, JSON.stringify(audit), audit.verdict, site.id);
+  return audit;
+}
+
+function siteRecordToAuditSite(site) {
+  return {
+    businessName: site.business_name,
+    industry: site.industry,
+    prompt: site.prompt,
+    brief: {
+      businessName: site.business_name,
+      industry: site.industry
+    }
+  };
+}
+
+function parseRealityReport(value) {
+  try {
+    return value ? JSON.parse(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function publicAuditSummary(report) {
+  return {
+    score: report.score,
+    verdict: report.verdict,
+    summary: report.summary,
+    metrics: report.metrics,
+    blockers: (report.checks || []).filter((check) => !check.passed && check.severity === 'blocker'),
+    warnings: (report.checks || []).filter((check) => !check.passed && check.severity !== 'blocker'),
+    checks: report.checks || []
+  };
+}
+
+function suggestDomains(domain) {
+  const clean = domain.split('.')[0]?.replace(/[^a-z0-9-]/g, '').replace(/^-|-$/g, '') || 'brand';
+  const base = clean || 'brand';
+  return [`${base}.co.uk`, `${base}.com`, `${base}studio.co.uk`, `${base}online.co.uk`].filter((item, index, arr) => arr.indexOf(item) === index && item !== domain).slice(0, 4);
+}
+
+function domainReadiness(domain, status) {
+  return {
+    domain,
+    status,
+    attachable: true,
+    nameserverMode: 'Point nameservers to your hosting provider.',
+    aRecordMode: 'Or set an A record to your VPS/server IP.',
+    ssl: 'Enable SSL after DNS propagation.',
+    appPrepared: 'Generated package will include canonical URLs, sitemap, robots.txt, and deployment notes for this domain.'
+  };
+}
+
+function parsePalette(value) {
+  try {
+    const palette = JSON.parse(value || 'null');
+    const hex = /^#[0-9a-f]{6}$/i;
+    if (palette && hex.test(palette.primary) && hex.test(palette.secondary) && hex.test(palette.accent)) return palette;
+  } catch {}
+  return null;
+}
+
+function parseBlueprint(value) {
+  try {
+    const blueprint = JSON.parse(value || 'null');
+    if (blueprint && Array.isArray(blueprint.pages) && blueprint.pages.length) return blueprint;
+  } catch {}
+  return null;
+}
+
+function parseClientAnswers(value) {
+  try {
+    const answers = JSON.parse(value || '[]');
+    if (!Array.isArray(answers)) return [];
+    return answers
+      .map((answer) => ({
+        id: String(answer.id || '').slice(0, 80),
+        label: String(answer.label || answer.id || '').slice(0, 120),
+        question: String(answer.question || '').slice(0, 240),
+        value: String(answer.value || '').trim().slice(0, 1200)
+      }))
+      .filter((answer) => answer.value);
+  } catch {
+    return [];
+  }
+}
+
+function parseImagePlan(value) {
+  try {
+    const plan = JSON.parse(value || '[]');
+    const assets = Array.isArray(plan) ? plan : Array.isArray(plan?.assets) ? plan.assets : [];
+    return assets
+      .map((asset, index) => ({
+        id: String(asset.id || `image_${index + 1}`).slice(0, 80),
+        purpose: String(asset.purpose || '').slice(0, 120),
+        size: ['1024x1024', '1536x1024', '1024x1536', 'auto'].includes(asset.size) ? asset.size : '1536x1024',
+        aspect: String(asset.aspect || '').slice(0, 40),
+        prompt: String(asset.prompt || '').trim().slice(0, 2200)
+      }))
+      .filter((asset) => asset.prompt);
+  } catch {
+    return [];
+  }
+}
+
+function parseGenerationMatrix(value) {
+  try {
+    const matrix = JSON.parse(value || 'null');
+    if (!matrix || typeof matrix !== 'object') return null;
+    return {
+      summary: String(matrix.summary || '').slice(0, 500),
+      audienceSegments: Array.isArray(matrix.audienceSegments) ? matrix.audienceSegments.map((item) => String(item).slice(0, 180)).slice(0, 8) : [],
+      contentAngles: Array.isArray(matrix.contentAngles) ? matrix.contentAngles.map((item) => String(item).slice(0, 220)).slice(0, 8) : [],
+      conversionMoments: Array.isArray(matrix.conversionMoments) ? matrix.conversionMoments.map((item) => String(item).slice(0, 180)).slice(0, 8) : [],
+      pageMatrix: Array.isArray(matrix.pageMatrix) ? matrix.pageMatrix.map((item) => ({
+        page: String(item.page || '').slice(0, 80),
+        visitorQuestion: String(item.visitorQuestion || '').slice(0, 240),
+        visualMove: String(item.visualMove || '').slice(0, 240),
+        primaryCta: String(item.primaryCta || '').slice(0, 120)
+      })).slice(0, 16) : []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseCompanyHouse(value) {
+  try {
+    const company = JSON.parse(value || 'null');
+    if (!company || typeof company !== 'object') return null;
+    return {
+      companyName: String(company.companyName || '').slice(0, 180),
+      companyNumber: String(company.companyNumber || '').slice(0, 20),
+      status: String(company.status || '').slice(0, 80),
+      type: String(company.type || '').slice(0, 80),
+      dateOfCreation: String(company.dateOfCreation || '').slice(0, 40),
+      address: String(company.address || '').slice(0, 260),
+      domainSuggestion: normalizeDomain(company.domainSuggestion || ''),
+      source: company.source === 'companies_house' ? 'companies_house' : ''
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeFontPreference(value) {
+  const font = String(value || '').trim().slice(0, 80);
+  const allowed = new Set(['General Sans', 'Inter', 'DM Sans', 'Work Sans', 'Instrument Serif', 'Cormorant Garamond', 'Cabinet Grotesk']);
+  return allowed.has(font) ? font : '';
+}

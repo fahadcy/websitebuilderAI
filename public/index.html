@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Website Builder</title>
+  <link rel="stylesheet" href="/assets/css/builder.css">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="builderHome()" class="mono-app">
+  <header class="topbar mono-topbar">
+    <a href="/">Website Builder</a>
+    <nav><a href="/admin">Admin</a></nav>
+  </header>
+
+  <main class="mono-shell">
+    <section class="mono-hero">
+      <p class="mono-kicker">Prompt. Brand. Domain. Deploy.</p>
+      <h1>Build a client-ready website package.</h1>
+      <p>Describe the business, check the domain, upload a logo if you have one, and generate a deployable site with CMS, SEO, maps, and handoff files.</p>
+    </section>
+
+    <section class="onboarding-panel" x-show="guideOpen">
+      <div class="onboarding-head">
+        <div>
+          <span>Guided onboarding</span>
+          <h2>Follow this path for the best website output</h2>
+          <p x-text="guideStatus()"></p>
+        </div>
+        <button type="button" class="ghost-button" @click="hideGuide()">Hide guide</button>
+      </div>
+      <div class="guide-track">
+        <button type="button" @click="scrollGuide('company-step')" :class="{active:guideStepIndex()===0,done:companyRegistered}">
+          <strong>1. Company</strong>
+          <span>Choose Companies House lookup or continue manually.</span>
+        </button>
+        <button type="button" @click="scrollGuide('prompt-step')" :class="{active:guideStepIndex()===1,done:promptReview}">
+          <strong>2. Prompt review</strong>
+          <span>Write or speak the brief, then click Make Your Prompt Good.</span>
+        </button>
+        <button type="button" @click="scrollGuide('prompt-step')" :class="{active:guideStepIndex()===2,done:approvedBlueprint}">
+          <strong>3. Blueprint</strong>
+          <span>Approve pages, questions, image plan, and generation matrix.</span>
+        </button>
+        <button type="button" @click="scrollGuide('domain-step')" :class="{active:guideStepIndex()===3,done:domain}">
+          <strong>4. Domain</strong>
+          <span>Confirm the domain so SEO and deployment files are prepared.</span>
+        </button>
+        <button type="button" @click="scrollGuide('brand-step')" :class="{active:guideStepIndex()===4}">
+          <strong>5. Brand</strong>
+          <span>Upload a logo, choose style/font, and add must-have details.</span>
+        </button>
+        <button type="button" @click="scrollGuide('generate-step')" :class="{active:guideStepIndex()===5}">
+          <strong>6. Generate</strong>
+          <span>The builder creates pages, images, CMS, SEO, ZIP, and Reality Check.</span>
+        </button>
+      </div>
+    </section>
+    <button type="button" class="guide-reopen" x-show="!guideOpen" @click="guideOpen=true; localStorage.setItem('builderGuideHidden','false')">Show guided onboarding</button>
+
+    <form method="post" action="/generate" class="mono-builder" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" :value="csrf">
+      <input type="hidden" name="logoPalette" :value="JSON.stringify(palette)">
+      <input type="hidden" name="siteBlueprint" :value="JSON.stringify(approvedBlueprint)">
+      <input type="hidden" name="generationMatrix" :value="JSON.stringify(approvedGenerationMatrix)">
+      <input type="hidden" name="imagePlan" :value="JSON.stringify(approvedImagePlan)">
+      <input type="hidden" name="generateImages" :value="generateImages ? 'true' : 'false'">
+      <input type="hidden" name="companyHouse" :value="JSON.stringify(selectedCompany)">
+      <input type="hidden" name="showCompanyHouse" :value="showCompanyHouse ? 'true' : 'false'">
+      <input type="hidden" name="clientAnswers" :value="JSON.stringify(answerPayload())">
+
+      <section class="mono-card company-card" id="company-step">
+        <div class="card-heading">
+          <span>01</span>
+          <div>
+            <h2>Is the company registered?</h2>
+            <p>Search Companies House first if this is a UK registered company.</p>
+          </div>
+        </div>
+        <div class="registration-choice">
+          <button type="button" @click="setCompanyRegistered('yes')" :class="{active:companyRegistered==='yes'}">Yes, search Companies House</button>
+          <button type="button" @click="setCompanyRegistered('no')" :class="{active:companyRegistered==='no'}">No, continue with prompt</button>
+        </div>
+        <div class="company-search-panel" x-show="companyRegistered === 'yes'">
+          <label>Search official company name
+            <div class="domain-row">
+              <input x-model="companySearch" @input.debounce.700ms="searchCompanyHouse" placeholder="Company name or number">
+              <button type="button" @click="searchCompanyHouse" :disabled="checkingCompany" x-text="checkingCompany ? 'Searching' : 'Search'"></button>
+            </div>
+          </label>
+          <div class="domain-status" x-show="companyMessage">
+            <strong>Official company lookup</strong>
+            <p x-text="companyMessage"></p>
+          </div>
+          <div class="company-results" x-show="companyResults.length">
+            <template x-for="company in companyResults" :key="company.companyNumber">
+              <button type="button" @click="selectCompany(company)">
+                <strong x-text="company.companyName"></strong>
+                <span x-text="`${company.companyNumber || 'No number'} - ${company.status || 'status unknown'}`"></span>
+                <small x-text="company.address"></small>
+              </button>
+            </template>
+          </div>
+          <div class="selected-company" x-show="selectedCompany">
+            <strong x-text="selectedCompany?.companyName"></strong>
+            <p x-text="selectedCompany?.address"></p>
+            <label class="toggle-line">
+              <input type="checkbox" x-model="showCompanyHouse">
+              <span>Show Companies House registered details on generated website</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="mono-card prompt-card" id="prompt-step" x-show="companyRegistered">
+        <div class="card-heading">
+          <span>02</span>
+          <div>
+            <h2>Website brief</h2>
+            <p>Keep it simple, then add detail only where it helps.</p>
+          </div>
+        </div>
+        <div class="voice-row">
+          <button type="button" class="voice-button" @click="startVoice" :class="{listening:isListening}" :disabled="!voiceSupported || isListening">Start voice</button>
+          <button type="button" class="voice-button stop-button" @click="stopVoice" :disabled="!isListening">Stop voice</button>
+          <p x-text="voiceStatus"></p>
+        </div>
+        <div class="voice-preview" x-show="voicePreview">
+          <span>Transcript</span>
+          <p x-text="voicePreview"></p>
+        </div>
+        <textarea name="prompt" maxlength="1000" x-model="prompt" @input="handlePromptInput" required></textarea>
+        <div class="extracted-brand" x-show="businessName">
+          <span>Detected business</span>
+          <strong x-text="businessName"></strong>
+        </div>
+        <div class="prompt-actions">
+          <span x-text="`${prompt.length}/1000`"></span>
+          <div class="prompt-action-buttons">
+            <button type="button" class="review-button attention-button" @click="reviewCurrentPrompt" :disabled="reviewingPrompt" :class="{urgent:prompt && !promptReview && !reviewingPrompt}">
+              <span x-show="!reviewingPrompt">Make Your Prompt Good</span>
+              <span x-show="reviewingPrompt">Reviewing prompt...</span>
+            </button>
+            <button type="button" class="ghost-button" @click="clearPrompt">Clear</button>
+          </div>
+        </div>
+        <div class="review-loading" x-show="reviewingPrompt">
+          <div class="loader-bars"><span></span><span></span><span></span></div>
+          <div>
+            <strong>Analysing the business, pages, images, and conversion plan.</strong>
+            <p>The builder is improving your prompt before showing the generation matrix.</p>
+          </div>
+        </div>
+        <div class="prompt-review" x-show="promptReview">
+          <div class="review-header">
+            <div>
+              <span>AI prompt review</span>
+              <h3>Approve the version you want to use</h3>
+            </div>
+            <button type="button" class="ghost-button" @click="promptReview=null">Close</button>
+          </div>
+          <div class="review-grid">
+            <article>
+              <span>Corrected</span>
+              <p x-text="promptReview?.correctedPrompt"></p>
+              <button type="button" @click="approvePrompt('corrected')">Use corrected prompt</button>
+            </article>
+            <article class="enhanced-review">
+              <span>Enhanced for better generation</span>
+              <p x-text="promptReview?.enhancedPrompt"></p>
+              <button type="button" @click="approvePrompt('enhanced')">Use enhanced prompt</button>
+            </article>
+          </div>
+          <div class="plan-grid">
+            <div>
+              <span>Pages to create</span>
+              <ul><template x-for="page in promptReview?.blueprint?.pages || []"><li><strong x-text="page.title"></strong><small x-text="page.purpose"></small></li></template></ul>
+            </div>
+            <div>
+              <span>Included features</span>
+              <ul><template x-for="feature in promptReview?.features || []"><li x-text="feature"></li></template></ul>
+            </div>
+          </div>
+          <div class="blueprint-detail" x-show="promptReview?.blueprint">
+            <div><span>Business type</span><p x-text="promptReview?.blueprint?.businessType"></p></div>
+            <div><span>Primary goal</span><p x-text="promptReview?.blueprint?.primaryGoal"></p></div>
+            <div><span>Colour and logo direction</span><p x-text="`${promptReview?.blueprint?.colourDirection} ${promptReview?.blueprint?.logoGuidance}`"></p></div>
+          </div>
+          <div class="matrix-panel" x-show="promptReview?.generationMatrix">
+            <div class="question-heading">
+              <span>Generation matrix</span>
+              <h3>What the builder will create before it starts</h3>
+              <p x-text="promptReview?.generationMatrix?.summary"></p>
+            </div>
+            <div class="matrix-grid">
+              <template x-for="item in promptReview?.generationMatrix?.pageMatrix || []" :key="item.page">
+                <article>
+                  <strong x-text="item.page"></strong>
+                  <span x-text="item.visitorQuestion"></span>
+                  <small x-text="item.visualMove"></small>
+                </article>
+              </template>
+            </div>
+          </div>
+          <div class="image-plan-panel" x-show="promptReview?.imagePlan?.length">
+            <div class="question-heading">
+              <span>AI image plan</span>
+              <h3>Images to generate for this website</h3>
+              <p>These prompts are passed to the image generator and saved inside the generated site package.</p>
+            </div>
+            <label class="toggle-line">
+              <input type="checkbox" x-model="generateImages">
+              <span>Generate AI images for this site</span>
+            </label>
+            <div class="image-plan-grid">
+              <template x-for="asset in promptReview?.imagePlan || []" :key="asset.id">
+                <article>
+                  <strong x-text="asset.id"></strong>
+                  <span x-text="`${asset.purpose} / ${asset.size}`"></span>
+                  <p x-text="asset.prompt"></p>
+                </article>
+              </template>
+            </div>
+          </div>
+          <div class="smart-questions" x-show="promptReview?.questions?.length">
+            <div class="question-heading">
+              <span>Smart follow-up questions</span>
+              <h3>Answer these for a more custom website</h3>
+              <p>The generator will use these as hard instructions, not vague inspiration.</p>
+            </div>
+            <template x-for="question in promptReview?.questions || []" :key="question.id">
+              <label class="smart-question">
+                <span><strong x-text="question.label"></strong><small x-show="question.required">Required for best result</small></span>
+                <em x-text="question.question"></em>
+                <textarea x-show="question.type !== 'text'" x-model="questionAnswers[question.id]" :placeholder="question.placeholder"></textarea>
+                <input x-show="question.type === 'text'" x-model="questionAnswers[question.id]" :placeholder="question.placeholder">
+              </label>
+            </template>
+          </div>
+          <div class="blueprint-approval">
+            <button type="button" @click="approveBlueprint">Approve page blueprint</button>
+            <p x-text="approvedBlueprint ? 'Blueprint, matrix, and image plan approved. Generation will use this plan.' : 'Approve the blueprint before generating for best results.'"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="mono-card domain-card" id="domain-step" :class="domainState">
+        <div class="card-heading">
+          <span>03</span>
+          <div>
+            <h2>Domain readiness</h2>
+            <p>Check the name and package the site ready to attach.</p>
+          </div>
+        </div>
+        <label>Preferred domain
+          <div class="domain-row">
+            <input name="domainName" x-model="domain" @input.debounce.700ms="handleDomainInput" placeholder="northlinedental.co.uk">
+            <button type="button" @click="checkDomain" :disabled="checkingDomain" x-text="checkingDomain ? 'Checking' : 'Check'"></button>
+          </div>
+        </label>
+        <div class="domain-status" x-show="domainMessage">
+          <strong x-text="domainTitle"></strong>
+          <p x-text="domainMessage"></p>
+        </div>
+        <div class="domain-suggestions" x-show="domainSuggestions.length">
+          <span>Alternatives</span>
+          <template x-for="suggestion in domainSuggestions" :key="suggestion">
+            <button type="button" @click="selectDomain(suggestion)" x-text="suggestion"></button>
+          </template>
+        </div>
+        <ol class="readiness-list">
+          <li :class="{done: domainState === 'available'}">Domain checked</li>
+          <li :class="{done: domain}">Canonical URLs prepared</li>
+          <li :class="{done: domain}">DNS instructions included</li>
+          <li :class="{done: domain}">Deployment handoff ready</li>
+        </ol>
+      </section>
+
+      <section class="mono-card" id="brand-step">
+        <div class="card-heading">
+          <span>04</span>
+          <div>
+            <h2>Brand inputs</h2>
+            <p>Optional, but useful for a more tailored result.</p>
+          </div>
+        </div>
+        <div class="brand-input-grid">
+          <label class="upload-box">Logo
+            <input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" @change="handleLogo($event)">
+            <small x-text="logoName || 'PNG, JPG, WebP, or SVG up to 8MB'"></small>
+          </label>
+          <div class="style-picker">
+            <span>Visual direction</span>
+            <input type="hidden" name="stylePreference" x-model="stylePreference">
+            <div class="style-options">
+              <template x-for="style in styleOptions" :key="style">
+                <button type="button" @click="stylePreference=style" :class="{active:stylePreference===style}" x-text="style"></button>
+              </template>
+            </div>
+          </div>
+          <label>Font preference
+            <select name="fontPreference" x-model="fontPreference">
+              <template x-for="font in fontOptions" :key="font">
+                <option :value="font === 'Auto choose for brand' ? '' : font" x-text="font"></option>
+              </template>
+            </select>
+            <small>Optional. Leave automatic if you want the generator to choose.</small>
+          </label>
+        </div>
+        <div class="palette mono-palette" x-show="palette">
+          <template x-for="colour in [palette.primary,palette.secondary,palette.accent]"><span :style="`background:${colour}`" :title="colour"></span></template>
+          <p>Logo palette extracted and passed into the generator.</p>
+        </div>
+      </section>
+
+      <details class="mono-card advanced-card">
+        <summary>Advanced brief details</summary>
+        <div class="spec-grid">
+          <label>Ideal customer
+            <input name="audience" x-model="audience" placeholder="Private clients, families, startups, high-ticket leads...">
+          </label>
+          <label>Brand positioning
+            <input name="positioning" x-model="positioning" placeholder="Premium, trusted, local, direct, specialist...">
+          </label>
+          <label>Must-have details
+            <textarea name="mustHave" x-model="mustHave" placeholder="Awards, prices, exact services, proof, guarantees, tone to avoid..."></textarea>
+          </label>
+        </div>
+        <div class="brief-prompts">
+          <template x-for="question in briefQuestions"><button type="button" @click="addBriefPrompt(question)" x-text="question"></button></template>
+        </div>
+      </details>
+
+      <section class="mono-submit" id="generate-step">
+        <div>
+          <strong>Ready to generate</strong>
+          <p>The ZIP will include the site, CMS, SEO files, creative brief, style guide, and deployment notes.</p>
+        </div>
+        <button>Generate Website</button>
+      </section>
+    </form>
+  </main>
+
+  <script src="/assets/js/builder.js"></script>
+</body>
+</html>

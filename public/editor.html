@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Visual Editor</title>
+  <link rel="stylesheet" href="/assets/css/builder.css">
+</head>
+<body class="editor-body">
+  <header class="editor-topbar">
+    <div>
+      <strong id="editor-site-name">Visual editor</strong>
+      <span id="editor-status">Select text or an image in the preview.</span>
+    </div>
+    <nav>
+      <select id="page-select" aria-label="Page"></select>
+      <a id="preview-link" class="button">Preview</a>
+      <a id="download-link" class="button">Download ZIP</a>
+      <button id="save-page" type="button">Save changes</button>
+    </nav>
+  </header>
+  <main class="editor-shell">
+    <aside class="editor-panel">
+      <section class="editor-card">
+        <span class="editor-kicker">Selected element</span>
+        <h1 id="selected-label">Nothing selected</h1>
+        <p id="selected-help">Click any heading, paragraph, button/link text, or image inside the website preview.</p>
+      </section>
+      <section class="editor-card" id="text-tools">
+        <span class="editor-kicker">Text</span>
+        <label>Content
+          <textarea id="text-content" rows="6"></textarea>
+        </label>
+        <label>Text size
+          <input id="font-size" type="range" min="12" max="96" value="18">
+          <output id="font-size-output">18px</output>
+        </label>
+        <label>Text colour
+          <input id="text-color" type="color" value="#111111">
+        </label>
+        <div class="editor-actions">
+          <button type="button" id="apply-text">Apply text</button>
+          <button type="button" id="clear-text-style" class="ghost-button">Clear style</button>
+        </div>
+      </section>
+      <section class="editor-card" id="image-tools">
+        <span class="editor-kicker">Image</span>
+        <label>Alt text
+          <input id="image-alt">
+        </label>
+        <label>Replace image
+          <input id="image-upload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml">
+        </label>
+        <label>Image URL
+          <input id="image-url" placeholder="assets/images/example.webp">
+        </label>
+        <div class="editor-actions">
+          <button type="button" id="apply-image">Apply image</button>
+        </div>
+      </section>
+      <section class="editor-card" id="logo-tools">
+        <span class="editor-kicker">Logo</span>
+        <label>Logo size
+          <input id="logo-size" type="range" min="28" max="180" value="64">
+          <output id="logo-size-output">64px</output>
+        </label>
+        <label>Logo placement
+          <select id="logo-placement">
+            <option value="default">Keep current layout</option>
+            <option value="left">Left</option>
+            <option value="center">Centre</option>
+            <option value="right">Right</option>
+          </select>
+        </label>
+        <label>Brand name
+          <select id="brand-name-mode">
+            <option value="keep">Keep current</option>
+            <option value="show">Show beside logo</option>
+            <option value="hide">Hide name, logo only</option>
+          </select>
+        </label>
+        <div class="editor-actions">
+          <button type="button" id="apply-logo">Apply logo layout</button>
+          <button type="button" id="reset-logo" class="ghost-button">Reset logo style</button>
+        </div>
+      </section>
+      <section class="editor-card">
+        <span class="editor-kicker">Page design</span>
+        <label>Page font scale
+          <input id="page-scale" type="range" min="90" max="115" value="100">
+          <output id="page-scale-output">100%</output>
+        </label>
+        <button type="button" id="apply-page-scale">Apply scale</button>
+      </section>
+    </aside>
+    <section class="editor-preview">
+      <iframe id="editor-frame" title="Editable website preview"></iframe>
+    </section>
+  </main>
+  <script src="/assets/js/editor.js"></script>
+</body>
+</html>

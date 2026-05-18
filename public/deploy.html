@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Domain Deployment</title>
+  <link rel="stylesheet" href="/assets/css/builder.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/">Website Builder</a>
+    <nav><a id="preview-link">Preview</a><a id="download-link">Download ZIP</a></nav>
+  </header>
+  <main class="shell">
+    <p class="mono-kicker">Deployment handoff</p>
+    <h1>Ready to attach to a domain.</h1>
+    <div class="deploy-status" id="site-summary">Preparing deployment options...</div>
+
+    <section class="dns-grid">
+      <article>
+        <h2>1. Domain</h2>
+        <p id="domain-copy">Use the selected domain or connect one later.</p>
+      </article>
+      <article>
+        <h2>2. DNS</h2>
+        <p>Point nameservers to the host, or set an A record to the server IP.</p>
+      </article>
+      <article>
+        <h2>3. SSL</h2>
+        <p>Enable HTTPS after DNS propagation. cPanel and most VPS panels can issue SSL automatically.</p>
+      </article>
+      <article>
+        <h2>4. Launch</h2>
+        <p>The ZIP includes canonical URLs, sitemap, robots.txt, CMS, SQL, and setup notes.</p>
+      </article>
+    </section>
+
+    <form method="post" id="deploy-form" class="deploy-grid">
+      <input type="hidden" name="_csrf" id="csrf">
+      <button name="target" value="cpanel">
+        <strong>cPanel shared hosting</strong>
+        Upload ZIP to public_html, import database.sql, configure .env, attach the domain.
+      </button>
+      <button name="target" value="vps-nginx">
+        <strong>VPS with Nginx</strong>
+        Point A record to the server IP, upload package, configure PHP-FPM and SSL.
+      </button>
+      <button name="target" value="static-plus-cms">
+        <strong>Static + CMS split</strong>
+        Put public pages on a static host and run admin/CMS on PHP hosting.
+      </button>
+      <button name="target" value="managed">
+        <strong>Mark ready for operator</strong>
+        Save this as ready for manual deployment and client handoff.
+      </button>
+    </form>
+  </main>
+  <script src="/assets/js/deploy.js"></script>
+</body>
+</html>
