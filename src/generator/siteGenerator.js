@@ -341,7 +341,7 @@ function layoutNav(site) {
   const logo = site.logoFile ? `<img class="brand-logo brand-logo-${header.logoSize}" src="${site.logoFile}" alt="${esc(site.brief.businessName)} logo">` : '';
   const name = header.showName || !site.logoFile ? `<span>${esc(site.brief.businessName)}</span>` : '';
   const brand = `${logo}${name}`;
-  const nav = links.map(([href, text]) => `<a href="${href}">${text}</a>`).join('');
+  const nav = navWithMega(site, links);
   const ctaHref = links.find(([href, text]) => /contact|enquir|book|reserve/i.test(`${href} ${text}`))?.[0] || 'contact.html';
   const cta = `<a class="header-cta" href="${ctaHref}">${esc(header.cta)}</a>`;
   const mode = themeToggleButton();
@@ -359,6 +359,30 @@ function layoutNav(site) {
     return `<header class="site-header header-minimal"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><nav>${nav}</nav>${cta}${mode}</header>`;
   }
   return `<header class="site-header header-classic"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><nav>${nav}</nav><div class="header-actions">${cta}${mode}</div></header>`;
+}
+
+function navWithMega(site, links) {
+  const serviceTerms = site.content.services.slice(0, 6);
+  const mega = `<span class="mega-trigger"><button type="button" aria-expanded="false">Services</button><span class="mega-menu"><span><strong>${esc(megaTitle(site))}</strong><em>${esc(site.content.microcopy.contactHint || site.content.localProof)}</em></span>${serviceTerms.map((service) => `<a href="${alternateHref(site, 'services.html')}"><strong>${esc(service.title)}</strong><small>${esc(service.description)}</small></a>`).join('')}<a class="mega-cta" href="contact.html">Start an enquiry</a></span></span>`;
+  let inserted = false;
+  const items = links.map(([href, text]) => {
+    if (!inserted && /service|treatment|course|product|shop|support|advisory/i.test(text)) {
+      inserted = true;
+      return mega;
+    }
+    return `<a href="${href}">${esc(text)}</a>`;
+  });
+  if (!inserted && serviceTerms.length) items.splice(Math.min(2, items.length), 0, mega);
+  return items.join('');
+}
+
+function megaTitle(site) {
+  const nature = projectNature(site);
+  if (nature === 'commerce') return 'Shop by customer intent';
+  if (nature === 'education') return 'Learning routes';
+  if (nature === 'professional') return 'Advisory routes';
+  if (nature === 'care') return 'Treatments and reassurance';
+  return 'Useful routes';
 }
 
 function themeToggleButton() {
@@ -579,7 +603,7 @@ function page(site, title, main, description, extraSchema = '') {
   const pagePath = title === 'Home' ? '' : `${slugify(title, { lower: true, strict: true })}.html`;
   const metaDescription = seoMetaDescription(site, title, description);
   const metaKeywords = keywordListForPage(site, title).slice(0, 10).join(', ');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | ${esc(b.businessName)}</title><meta name="description" content="${esc(metaDescription)}"><meta name="keywords" content="${esc(metaKeywords)}"><link rel="canonical" href="https://${esc(site.domain)}/${pagePath}"><meta property="og:title" content="${esc(title)} | ${esc(b.businessName)}"><meta property="og:description" content="${esc(metaDescription)}"><meta property="og:type" content="website"><meta property="og:url" content="https://${esc(site.domain)}/${pagePath}"><meta name="twitter:card" content="summary_large_image"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(site.tokens.fonts.display)}:wght@500;700&family=${encodeURIComponent(site.tokens.fonts.body)}:wght@400;500;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="assets/css/styles.css"><script type="application/ld+json">${schema}</script>${extraSchema}</head><body class="design-v${site.designVariant} mood-${visualMood(site)}"><div class="scroll-progress" data-scroll-progress></div>${layoutNav(site)}<main>${main}</main>${footer(site, title)}<script src="assets/js/app.js" defer></script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | ${esc(b.businessName)}</title><meta name="description" content="${esc(metaDescription)}"><meta name="keywords" content="${esc(metaKeywords)}"><link rel="canonical" href="https://${esc(site.domain)}/${pagePath}"><meta property="og:title" content="${esc(title)} | ${esc(b.businessName)}"><meta property="og:description" content="${esc(metaDescription)}"><meta property="og:type" content="website"><meta property="og:url" content="https://${esc(site.domain)}/${pagePath}"><meta name="twitter:card" content="summary_large_image"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(site.tokens.fonts.display)}:wght@500;700&family=${encodeURIComponent(site.tokens.fonts.body)}:wght@400;500;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="assets/css/styles.css"><script type="application/ld+json">${schema}</script>${extraSchema}</head><body class="design-v${site.designVariant} mood-${visualMood(site)}"><div class="scroll-progress" data-scroll-progress></div>${layoutNav(site)}<main>${main}</main>${footer(site, title)}<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script><script src="assets/js/app.js" defer></script></body></html>`;
 }
 function home(site) {
   const { brief: b, content: c } = site;
@@ -1186,10 +1210,23 @@ function careHome(site, pageItem) {
 }
 
 function professionalHome(site, pageItem) {
-  return `<section class="professional-hero professional-hero-visual"><aside class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Request consultation')}</a></aside><figure class="professional-visual reveal"><img src="${imageUrl(site, `professional advisory hero ${site.brief.industry} ${site.generationSeed}`, 1200, 920)}" alt="${esc(site.brief.businessName)} professional advisory visual"><figcaption>${esc(site.content.microcopy.bookingReassurance || site.content.localProof)}</figcaption></figure></section>
+  const variant = site.designVariant % 3;
+  const form = heroLeadForm(site, 'Confidential enquiry');
+  const visual = `<figure class="professional-visual reveal"><img src="${imageUrl(site, `professional advisory hero ${site.brief.industry} ${site.generationSeed}`, 1200, 920)}" alt="${esc(site.brief.businessName)} professional advisory visual"><figcaption>${esc(site.content.microcopy.bookingReassurance || site.content.localProof)}</figcaption></figure>`;
+  const copy = `<aside class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Request consultation')}</a></aside>`;
+  const hero = variant === 0
+    ? `<section class="professional-hero professional-hero-visual professional-hero-form">${copy}${visual}${form}</section>`
+    : variant === 1
+      ? `<section class="professional-hero professional-hero-visual professional-hero-form professional-hero-form-left">${form}${copy}${visual}</section>`
+      : `<section class="professional-hero professional-hero-visual professional-hero-form professional-hero-wide">${copy}${form}${visual}</section>`;
+  return `${hero}
   <section class="professional-intelligence"><div class="section-heading reveal"><p class="eyebrow">Why this matters</p><h2>${esc(site.content.brandThesis)}</h2><p>${esc(site.content.localProof)}</p></div><div class="decision-stack">${site.content.processSteps.slice(0, 4).map((step, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></article>`).join('')}</div></section>
   <section class="proof-ledger">${site.content.differentiators.slice(0, 3).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>
   <section class="practice-matrix">${site.content.services.slice(0, 6).map((s, i) => serviceRichCard(site, s, i, 'advisory route')).join('')}</section>`;
+}
+
+function heroLeadForm(site, title = 'Start here') {
+  return `<form method="post" action="admin/contact.php" class="hero-lead-form reveal" data-secure-form><input type="hidden" name="_csrf" value=""><p class="eyebrow">${esc(title)}</p><h2>${esc(site.content.conversionPrompts[0]?.title || 'Tell us what is happening')}</h2><label>Name<input name="name" autocomplete="name" required></label><label>Email<input type="email" name="email" autocomplete="email" required></label><label>Message<textarea name="message" required placeholder="${esc(site.content.microcopy.contactHint || 'Briefly describe what you need help with.')}"></textarea></label><button class="button">${esc(site.content.conversionPrompts[0]?.cta || 'Send enquiry')}</button><small>${esc(site.content.microcopy.bookingReassurance || 'A short message is enough to begin.')}</small></form>`;
 }
 
 function fitnessHome(site, pageItem) {
@@ -1581,7 +1618,8 @@ document.querySelectorAll('img').forEach((img,index)=>{const parent=img.parentEl
 document.querySelectorAll('article,blockquote,details,.button,.text-link').forEach((el)=>el.classList.add('magnetic-hover'));
 document.querySelectorAll('.reveal,.motion-media').forEach(el=>{try{io.observe(el)}catch{}});
 let lastY=scrollY;const header=document.querySelector('.site-header');const motionTick=()=>{const y=scrollY;const vh=innerHeight||1;document.querySelectorAll('.parallax-soft,.parallax-deep').forEach((el)=>{const rect=el.getBoundingClientRect();if(rect.bottom<0||rect.top>vh)return;const center=(rect.top+rect.height/2)-vh/2;el.style.setProperty('--parallax-y',(-center*.035).toFixed(2)+'px');el.style.setProperty('--parallax-y-deep',(-center*.065).toFixed(2)+'px')});document.querySelectorAll('section').forEach((section)=>{const rect=section.getBoundingClientRect();const progress=Math.max(0,Math.min(1,1-Math.abs((rect.top+rect.height/2)-vh/2)/(vh*.85)));section.style.setProperty('--section-progress',progress.toFixed(3));if(progress>.12)section.classList.add('section-inview')});if(header){if(y>lastY&&y>180)header.classList.add('header-hidden');else header.classList.remove('header-hidden')}lastY=y};if(!reduceMotion){addEventListener('scroll',()=>requestAnimationFrame(motionTick),{passive:true});addEventListener('resize',motionTick);motionTick()}
-document.querySelectorAll('.service-row').forEach(row=>{const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)row.classList.add('active');else row.classList.remove('active')}),{threshold:.45});observer.observe(row)});`;
+document.querySelectorAll('.service-row').forEach(row=>{const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)row.classList.add('active');else row.classList.remove('active')}),{threshold:.45});observer.observe(row)});
+if(window.jQuery){jQuery(($)=>{$('.mega-trigger>button').on('click',function(){const item=$(this).closest('.mega-trigger');$('.mega-trigger').not(item).removeClass('is-open').find('button').attr('aria-expanded','false');item.toggleClass('is-open');$(this).attr('aria-expanded',item.hasClass('is-open')?'true':'false')});$(document).on('click',function(event){if(!$(event.target).closest('.mega-trigger').length){$('.mega-trigger').removeClass('is-open').find('button').attr('aria-expanded','false')}});$('.hero-lead-form input,.hero-lead-form textarea').on('focus',function(){$(this).closest('.hero-lead-form').addClass('is-focused')}).on('blur',function(){$(this).closest('.hero-lead-form').removeClass('is-focused')});$('.hero-lead-form').on('submit',function(){$(this).addClass('is-sent').find('button').text('Sending...')});$('.site-header nav a,.mega-menu a').on('mouseenter',function(){$(this).css('transform','translateY(-2px)')}).on('mouseleave',function(){$(this).css('transform','')})})}`;
 }
 
 function professionalQualityCss() {
@@ -1591,6 +1629,8 @@ h1{word-spacing:normal}
 .professional-hero-visual h1,.software-hero h1{max-width:980px}
 .professional-visual img,.software-visual img{background:var(--secondary)}
 .professional-intelligence .section-heading h2{max-width:980px}
+.site-header nav{align-items:center}.site-header nav>a,.mega-trigger>button{position:relative;background:transparent;color:inherit;border:0;padding:.65rem .15rem;font:inherit;font-weight:800;cursor:pointer}.site-header nav>a:after,.mega-trigger>button:after{content:"";position:absolute;left:0;right:100%;bottom:.28rem;height:2px;background:var(--accent);transition:right .22s ease}.site-header nav>a:hover:after,.mega-trigger:hover>button:after,.mega-trigger.is-open>button:after{right:0}.mega-trigger{position:relative;display:inline-flex}.mega-menu{position:absolute;top:calc(100% + 18px);left:50%;z-index:40;width:min(760px,calc(100vw - 2rem));display:grid;grid-template-columns:1.05fr 1fr 1fr;gap:.85rem;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 10%);border:1px solid var(--line);box-shadow:0 28px 80px color-mix(in srgb,var(--ink),transparent 84%);transform:translate(-50%,10px);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}.mega-menu a,.mega-menu>span{display:grid;gap:.3rem;padding:.9rem;text-decoration:none;background:color-mix(in srgb,var(--secondary),var(--surface) 72%);border-radius:var(--radius-sm)}.mega-menu small,.mega-menu em{font-size:.85rem;color:var(--muted);font-style:normal;line-height:1.45}.mega-menu .mega-cta{background:var(--primary);color:#fff;align-content:center;text-align:center;font-weight:900}.professional-hero-form{grid-template-columns:minmax(0,.95fr) minmax(340px,.72fr) minmax(300px,.55fr);align-items:center}.professional-hero-form-left{grid-template-columns:minmax(300px,.55fr) minmax(0,.95fr) minmax(340px,.72fr)}.professional-hero-wide{grid-template-columns:minmax(0,1fr) minmax(320px,.6fr);grid-template-areas:"copy form" "visual visual"}.professional-hero-wide aside{grid-area:copy}.professional-hero-wide .hero-lead-form{grid-area:form}.professional-hero-wide .professional-visual{grid-area:visual}.hero-lead-form{display:grid;gap:.85rem;padding:clamp(1.1rem,2.4vw,1.7rem);background:color-mix(in srgb,var(--surface),#fff 18%);border:1px solid var(--line);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 84%);border-radius:var(--radius-lg)}.hero-lead-form h2{font-size:clamp(1.45rem,2.1vw,2.35rem);margin:0}.hero-lead-form input,.hero-lead-form textarea{background:color-mix(in srgb,var(--surface),#fff 16%)}.hero-lead-form textarea{min-height:110px}.hero-lead-form small{color:var(--muted);line-height:1.45}.hero-lead-form.is-sent{outline:3px solid color-mix(in srgb,var(--accent),transparent 35%)}
+@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
 @media(max-width:680px){.professional-hero-visual h1,.software-hero h1{font-size:clamp(2.35rem,11vw,3.8rem);line-height:1.05}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}}
 `;
 }
