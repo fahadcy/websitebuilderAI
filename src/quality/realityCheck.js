@@ -49,7 +49,7 @@ export async function runRealityCheck(site, outDir) {
   ]);
 
   const checks = [
-    ...fileStructureChecks(files),
+    ...fileStructureChecks(site, files),
     ...pageQualityChecks(site, pages),
     ...linkAndAssetChecks(files, pages),
     ...seoChecks(pages),
@@ -114,8 +114,10 @@ This report is generated before the package is handed to the client. A blocker m
 `;
 }
 
-function fileStructureChecks(files) {
-  return REQUIRED_FILES.map((file) => check({
+function fileStructureChecks(site, files) {
+  const isSinglePage = site?.templateProfile?.mode === 'onePage' || site?.templateProfile?.mode === 'campaign';
+  const required = isSinglePage ? REQUIRED_FILES.filter((file) => file !== 'contact.html') : REQUIRED_FILES;
+  return required.map((file) => check({
     category: 'architecture',
     name: `${file} exists`,
     passed: files.includes(file),
@@ -129,12 +131,13 @@ function pageQualityChecks(site, pages) {
   const index = pages['index.html'] || '';
   const pageCount = Object.keys(pages).length;
   const nature = projectNatureFromSite(site);
+  const isSinglePage = site?.templateProfile?.mode === 'onePage' || site?.templateProfile?.mode === 'campaign';
   const checks = [
     check({
       category: 'ux',
-      name: 'Generated site includes multiple real pages',
-      passed: pageCount >= 6,
-      detail: `${pageCount} HTML pages found`,
+      name: isSinglePage ? 'Generated site follows intentional one-page format' : 'Generated site includes multiple real pages',
+      passed: isSinglePage ? pageCount >= 3 && /href="#contact"|id="contact"/i.test(index) : pageCount >= 6,
+      detail: isSinglePage ? `${pageCount} HTML pages found with one-page anchor navigation` : `${pageCount} HTML pages found`,
       severity: 'blocker',
       weight: 4
     }),
@@ -344,7 +347,7 @@ function uxChecks(pages, css, appJs) {
     check({
       category: 'ux',
       name: 'Contact page has actionable form or contact links',
-      passed: /<form[\s\S]*name=.*email|mailto:|tel:/i.test(pages['contact.html'] || ''),
+      passed: /<form[\s\S]*name=.*email|mailto:|tel:/i.test(pages['contact.html'] || pages['index.html'] || ''),
       detail: 'Visitor can make contact without guessing',
       severity: 'blocker',
       weight: 4

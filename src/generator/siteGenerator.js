@@ -278,6 +278,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
   progress({ status: 'running', progress: 22, message: 'Building SEO keyword map and density targets' });
   applySeoKeywordStrategy(site);
   site.designIntelligence = buildDesignIntelligence(site);
+  site.templateProfile = chooseTemplateProfile(site);
   progress({ status: 'running', progress: 24, message: 'Infusing keywords naturally into page content' });
   const imageResult = await generateSiteImages(site, outDir, progress);
   site.assetMap = imageResult.assetMap || {};
@@ -360,10 +361,19 @@ function layoutNav(site) {
   if (header.layout === 'minimal') {
     return `<header class="site-header header-minimal"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><nav>${nav}</nav>${cta}${mode}</header>`;
   }
+  if (header.layout === 'sidebar') {
+    return `<header class="site-header header-sidebar"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><button class="menu-toggle" data-menu-toggle aria-label="Open menu"><span></span><span></span></button><nav>${nav}</nav><div class="header-actions">${cta}${mode}</div></header>`;
+  }
+  if (header.layout === 'overlay') {
+    return `<header class="site-header header-overlay"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><div class="header-note">${esc(header.note)}</div><button class="menu-toggle" data-menu-toggle aria-label="Open menu"><span></span><span></span></button><nav>${nav}</nav><div class="header-actions">${cta}${mode}</div></header>`;
+  }
   return `<header class="site-header header-classic"><a class="brand brand-${header.brandLayout}" href="index.html">${brand}</a><nav>${nav}</nav><div class="header-actions">${cta}${mode}</div></header>`;
 }
 
 function navWithMega(site, links) {
+  if (site.templateProfile?.mode === 'onePage' || site.templateProfile?.mode === 'campaign') {
+    return links.map(([href, text]) => `<a href="${href}">${esc(text)}</a>`).join('');
+  }
   const serviceTerms = site.content.services.slice(0, 6);
   const mega = `<span class="mega-trigger"><button type="button" aria-expanded="false">Services</button><span class="mega-menu"><span><strong>${esc(megaTitle(site))}</strong><em>${esc(site.content.microcopy.contactHint || site.content.localProof)}</em></span>${serviceTerms.map((service) => `<a href="${alternateHref(site, 'services.html')}"><strong>${esc(service.title)}</strong><small>${esc(service.description)}</small></a>`).join('')}<a class="mega-cta" href="contact.html">Start an enquiry</a></span></span>`;
   let inserted = false;
@@ -412,7 +422,17 @@ function headerBrandMode(site) {
 
 function headerDesign(site) {
   const nature = projectNature(site);
-  const seed = hashNumber(`${site.generationSeed}-${site.brief.businessName}-${nature}-${site.blueprint?.visualStrategy || ''}`);
+  const profile = site.templateProfile || chooseTemplateProfile(site);
+  const seed = hashNumber(`${site.generationSeed}-${site.brief.businessName}-${nature}-${profile.mode}-${site.blueprint?.visualStrategy || ''}`);
+  if (profile.mode === 'onePage') {
+    const onePageLayouts = ['overlay', 'sidebar', 'minimal', 'split'];
+    const brand = headerBrandMode(site);
+    return { layout: onePageLayouts[seed % onePageLayouts.length], logoSize: brand.size, showName: brand.showName, brandLayout: brand.layout, cta: ctaFromGoal(site.blueprint?.primaryGoal || ''), note: profile.label };
+  }
+  if (profile.mode === 'campaign') {
+    const brand = headerBrandMode(site);
+    return { layout: seed % 2 ? 'overlay' : 'minimal', logoSize: brand.size, showName: brand.showName, brandLayout: brand.layout, cta: ctaFromGoal(site.blueprint?.primaryGoal || ''), note: profile.label };
+  }
   const layoutsByNature = {
     commerce: ['minimal', 'stacked', 'classic', 'split'],
     hospitality: ['split', 'editorial', 'stacked', 'classic'],
@@ -439,6 +459,18 @@ function headerDesign(site) {
 }
 
 function navLinks(site) {
+  if (site.templateProfile?.mode === 'onePage' || site.templateProfile?.mode === 'campaign') {
+    const nature = projectNature(site);
+    const labels = {
+      commerce: [['#home', 'Home'], ['#shop', 'Shop'], ['#proof', 'Proof'], ['#faq', 'FAQ'], ['#contact', 'Contact']],
+      hospitality: [['#home', 'Home'], ['#menu', 'Menu'], ['#booking', 'Booking'], ['#proof', 'Reviews'], ['#contact', 'Contact']],
+      professional: [['#home', 'Brief'], ['#services', 'Services'], ['#proof', 'Proof'], ['#process', 'Process'], ['#contact', 'Enquiry']],
+      education: [['#home', 'Home'], ['#courses', 'Courses'], ['#outcomes', 'Outcomes'], ['#faq', 'FAQ'], ['#contact', 'Enquire']],
+      portfolio: [['#home', 'Intro'], ['#work', 'Work'], ['#proof', 'Proof'], ['#contact', 'Contact']],
+      software: [['#home', 'Product'], ['#features', 'Features'], ['#proof', 'Proof'], ['#contact', 'Demo']]
+    };
+    return labels[nature] || [['#home', 'Home'], ['#services', 'Services'], ['#proof', 'Proof'], ['#faq', 'FAQ'], ['#contact', 'Contact']];
+  }
   const pages = site.blueprint?.pages;
   if (!Array.isArray(pages) || !pages.length) return [['index.html', 'Home'], ['about.html', 'About'], ['services.html', 'Services'], ['team.html', 'Team'], ['blog.html', 'Blog'], ['contact.html', 'Contact']];
   return pages.map((pageItem) => [pageFileName(pageItem), pageItem.title]);
@@ -683,7 +715,78 @@ function sectionsForNaturePage(nature, title) {
   return ['Overview', 'Proof', 'Details', 'CTA'];
 }
 
+function chooseTemplateProfile(site) {
+  const nature = projectNature(site);
+  const prompt = String(site.metadata?.prompt || '').toLowerCase();
+  const seed = hashNumber(`${site.generationSeed || site.brief.businessName}-${nature}-${prompt}`);
+  if (/one[-\s]?page|single[-\s]?page|landing page|single site|single-site/.test(prompt)) return { mode: 'onePage', label: 'One-page website' };
+  if (/corporate|multi[-\s]?page|multiple pages|full website|company website/.test(prompt)) return { mode: 'corporate', label: 'Corporate multi-page site' };
+  if (/campaign|launch|sale|offer|promotion/.test(prompt) && nature === 'commerce') return { mode: 'campaign', label: 'Campaign landing site' };
+  const pools = {
+    commerce: [{ mode: 'catalogue', label: 'Catalogue site' }, { mode: 'campaign', label: 'Campaign landing site' }, { mode: 'onePage', label: 'One-page retail site' }, { mode: 'corporate', label: 'Retail website' }],
+    hospitality: [{ mode: 'booking', label: 'Booking-first site' }, { mode: 'onePage', label: 'One-page restaurant site' }, { mode: 'editorial', label: 'Atmospheric venue site' }],
+    professional: [{ mode: 'corporate', label: 'Corporate multi-page site' }, { mode: 'onePage', label: 'One-page advisory site' }, { mode: 'editorial', label: 'Authority editorial site' }],
+    education: [{ mode: 'onePage', label: 'One-page tutoring site' }, { mode: 'corporate', label: 'Education website' }, { mode: 'editorial', label: 'Outcome-led learning site' }],
+    portfolio: [{ mode: 'portfolio', label: 'Portfolio site' }, { mode: 'onePage', label: 'One-page portfolio' }, { mode: 'editorial', label: 'Editorial studio site' }],
+    software: [{ mode: 'corporate', label: 'SaaS website' }, { mode: 'onePage', label: 'Product landing page' }, { mode: 'campaign', label: 'Demo campaign site' }],
+    care: [{ mode: 'corporate', label: 'Clinic website' }, { mode: 'onePage', label: 'One-page clinic site' }, { mode: 'booking', label: 'Booking-first clinic site' }],
+    service: [{ mode: 'onePage', label: 'One-page local service site' }, { mode: 'corporate', label: 'Local business website' }, { mode: 'editorial', label: 'Proof-led service site' }]
+  };
+  const choices = pools[nature] || pools.service;
+  return choices[seed % choices.length];
+}
+
+function singlePageSite(site) {
+  const nature = projectNature(site);
+  const hero = `<div id="home">${natureHome(site, { title: 'Home', layoutArchetype: site.templateProfile?.mode === 'campaign' ? 'heroPoster' : '' })}</div>`;
+  const serviceId = nature === 'commerce' ? 'shop' : nature === 'hospitality' ? 'menu' : nature === 'software' ? 'features' : nature === 'education' ? 'courses' : 'services';
+  const services = `<section id="${serviceId}" class="single-section single-services"><div class="section-heading reveal"><p class="eyebrow">${esc(site.templateProfile?.label || 'Website format')}</p><h2>${esc(singlePageServiceHeadline(site))}</h2><p>${esc(site.content.localProof)}</p></div><div class="premium-list">${site.content.services.slice(0, 6).map((service, i) => serviceRichCard(site, service, i, singlePageServiceLabel(nature))).join('')}</div></section>`;
+  const proof = `<section id="proof" class="single-section single-proof"><div class="stats-depth">${site.content.stats.slice(0, 3).map((stat) => `<article class="reveal"><strong data-count="${stat.value}">0</strong><span>${esc(stat.label)}</span></article>`).join('')}</div><div class="testimonial-rail">${site.content.testimonials.slice(0, 3).map((testimonial) => `<blockquote class="reveal"><p>"${esc(testimonial.quote)}"</p><cite>${esc(testimonial.name)}${testimonial.context ? ` / ${esc(testimonial.context)}` : ''}</cite></blockquote>`).join('')}</div></section>`;
+  const processId = nature === 'education' ? 'outcomes' : nature === 'hospitality' ? 'booking' : 'process';
+  const process = `<section id="${processId}" class="single-section single-process"><div class="section-heading reveal"><p class="eyebrow">${esc(singlePageProcessEyebrow(nature))}</p><h2>${esc(singlePageProcessHeadline(site))}</h2></div><ol class="process">${site.content.processSteps.slice(0, 4).map((step, i) => `<li class="reveal"><span>${i + 1}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></li>`).join('')}</ol></section>`;
+  const faq = `<section id="faq" class="single-section single-faq"><div class="section-heading reveal"><p class="eyebrow">Questions</p><h2>Answers before the visitor takes action.</h2></div><div class="faq-columns">${site.content.faqs.slice(0, 5).map((faqItem) => `<details class="reveal"><summary>${esc(faqItem.question)}</summary><p>${esc(faqItem.answer)}</p></details>`).join('')}</div></section>`;
+  const contact = `<section id="contact" class="single-section single-contact"><div class="reveal"><p class="eyebrow">Contact</p><h2>${esc(site.content.conversionPrompts[0]?.title || 'Start here')}</h2><p>${esc(site.content.conversionPrompts[0]?.text || site.content.microcopy.contactHint)}</p><address>${esc(site.brief.address)}<br>${esc(site.brief.contactPhone)}<br>${esc(site.brief.contactEmail)}</address></div>${heroLeadForm(site, site.templateProfile?.mode === 'campaign' ? 'Claim the offer' : 'Send enquiry')}</section>`;
+  return [hero, services, process, proof, faq, contact].join('')
+    .replaceAll('href="contact.html"', 'href="#contact"')
+    .replaceAll('href="services.html"', `href="#${serviceId}"`)
+    .replaceAll('href="courses.html"', `href="#${serviceId}"`)
+    .replaceAll('href="shop.html"', `href="#${serviceId}"`)
+    .replaceAll('href="sale.html"', `href="#${serviceId}"`);
+}
+
+function singlePageServiceHeadline(site) {
+  const nature = projectNature(site);
+  if (nature === 'commerce') return 'Products, offers, and buying confidence in one place.';
+  if (nature === 'hospitality') return 'Menu highlights and booking details without making guests search.';
+  if (nature === 'education') return 'Learning routes built around student confidence and parent clarity.';
+  if (nature === 'professional') return 'Specialist routes for serious decisions.';
+  return 'The essential offer, proof, and next step on one page.';
+}
+
+function singlePageServiceLabel(nature) {
+  return { commerce: 'product', hospitality: 'menu', education: 'course', professional: 'route', software: 'feature' }[nature] || 'service';
+}
+
+function singlePageProcessEyebrow(nature) {
+  return { commerce: 'Buying path', hospitality: 'Booking path', education: 'Learning path', professional: 'Decision path', software: 'Workflow' }[nature] || 'How it works';
+}
+
+function singlePageProcessHeadline(site) {
+  const nature = projectNature(site);
+  if (nature === 'commerce') return 'From browsing to choosing without friction.';
+  if (nature === 'hospitality') return 'From appetite to reservation in a few clear steps.';
+  if (nature === 'education') return 'From uncertainty to a focused learning plan.';
+  if (nature === 'professional') return 'From pressure to a controlled next step.';
+  return `A simple route to working with ${site.brief.businessName}.`;
+}
+
 function buildPageFiles(site) {
+  if (site.templateProfile?.mode === 'onePage' || site.templateProfile?.mode === 'campaign') {
+    return [
+      ['index.html', page(site, 'Home', singlePageSite(site), `${site.brief.businessName} one-page ${projectNature(site)} website with clear sections and direct conversion.`)],
+      ['privacy.html', page(site, 'Privacy Policy', privacy(site), 'How we collect and protect personal data.')]
+    ];
+  }
   if (!site.blueprint?.pages?.length) {
     return [
       ['index.html', page(site, 'Home', withHomeDepth(site, natureHome(site, { title: 'Home' })), 'Expert local care and clear next steps.')],
@@ -765,6 +868,10 @@ function notFound(site) {
 
 function footer(site, pageTitle = 'Home') {
   const official = site.metadata?.showCompanyHouse && site.metadata?.companyHouse ? `<p class="company-house-note">Registered company: ${esc(site.metadata.companyHouse.companyName)}${site.metadata.companyHouse.companyNumber ? ` · ${esc(site.metadata.companyHouse.companyNumber)}` : ''}${site.metadata.companyHouse.status ? ` · ${esc(site.metadata.companyHouse.status)}` : ''}</p>` : '';
+  if (site.templateProfile?.mode === 'onePage' || site.templateProfile?.mode === 'campaign') {
+    const proof = site.content.stats.slice(0, 3).map((stat) => `<span><strong>${esc(stat.value)}</strong>${esc(stat.label)}</span>`).join('');
+    return `<footer class="footer-cta single-page-footer"><div><p class="eyebrow">${esc(site.templateProfile.label)}</p><h2>${esc(site.content.conversionPrompts[0]?.title || `Start with ${site.brief.businessName}`)}</h2><p>${esc(site.content.conversionPrompts[0]?.text || site.content.microcopy.contactHint)}</p><a class="button" href="#contact">${esc(site.content.conversionPrompts[0]?.cta || 'Contact us')}</a>${official}</div><div class="footer-proof">${proof}</div><nav class="footer-legal"><a href="privacy.html">Privacy</a><a href="sitemap.xml">Sitemap</a><span>© ${new Date().getFullYear()} ${esc(site.brief.businessName)}</span></nav></footer>`;
+  }
   const strategy = footerStrategy(site, pageTitle);
   const links = footerNav(site);
   const legal = `<nav class="footer-legal"><a href="privacy.html">Privacy</a><a href="sitemap.xml">Sitemap</a><span>© ${new Date().getFullYear()} ${esc(site.brief.businessName)}</span></nav>`;
@@ -1824,7 +1931,8 @@ function premiumCssV6(site) {
 .course-grid article h2,.premium-list article h2,.generic-mosaic article h2,.cards article h2,.service-rich-card h2,.proof-ledger article h2,.practice-matrix article h2{font-size:clamp(1.45rem,2vw,2.35rem);line-height:1.08;overflow-wrap:break-word}.course-grid article p,.premium-list article p,.generic-mosaic article p,.cards article p,.service-rich-card p,.proof-ledger article p,.practice-matrix article p{font-size:clamp(1rem,1.08vw,1.12rem);line-height:1.72}.premium-list article,.proof-ledger article,.practice-matrix article,.feature-flow article,.cards article,.service-rich-card{border:0!important;box-shadow:0 20px 60px color-mix(in srgb,var(--ink),transparent 92%);background:color-mix(in srgb,var(--surface),var(--secondary) 10%)}.proof-ledger,.practice-matrix,.feature-flow{gap:var(--space-md)}.service-rich-card{display:grid;gap:.95rem;align-content:start;min-height:360px;padding:clamp(1.25rem,2.4vw,2.1rem)}.service-rich-card>span{font-size:.75rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--primary)}.service-rich-card ul{margin:.2rem 0 0;padding-left:1.1rem;display:grid;gap:.45rem}.service-rich-card .card-proof{margin-top:auto;padding-top:.8rem;border-top:1px solid color-mix(in srgb,var(--ink),transparent 90%);font-weight:800;color:var(--primary)}.product-signal-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.product-signal-board article{border:0;padding:var(--space-md);background:color-mix(in srgb,var(--surface),transparent 8%);box-shadow:0 18px 50px color-mix(in srgb,var(--ink),transparent 88%)}.product-signal-board h2{font-size:clamp(1.35rem,2.2vw,2.4rem)}.product-signal-board span{font-weight:900;color:var(--accent)}.education-proof-panel{display:grid;grid-template-columns:.86fr 1.14fr;gap:var(--space-lg);background:var(--secondary)}.education-proof-panel>div:last-child{display:grid;gap:var(--space-sm)}.education-proof-panel details{padding:1rem}.motion-title{word-spacing:normal}.motion-title .motion-word{margin-right:.18em}.motion-title .motion-word:last-of-type{margin-right:0}
 footer.footer-minimal,footer.footer-utility,footer.footer-doormat,footer.footer-mega,footer.footer-cta,footer.footer-hub,footer.footer-product,footer.footer-contextual,footer.footer-invisible{align-items:start}footer nav{display:flex;gap:.75rem;flex-wrap:wrap}footer h2{font-size:clamp(2rem,4vw,4rem)}footer h3{font-size:1rem;text-transform:uppercase;letter-spacing:.12em}.footer-legal{font-size:.9rem;color:var(--muted)}.footer-minimal{display:flex;justify-content:space-between;gap:1rem}.footer-utility{display:grid;grid-template-columns:1fr auto;gap:var(--space-md);background:var(--secondary)}.footer-doormat{display:grid;grid-template-columns:.9fr 1.2fr auto;gap:var(--space-lg)}.footer-doormat nav:not(.footer-legal){align-content:start}.footer-mega{display:grid;grid-template-columns:1.2fr .7fr .8fr .9fr;gap:var(--space-lg);background:var(--ink);color:var(--surface)}.footer-mega a,.footer-mega .footer-legal,.footer-mega address{color:color-mix(in srgb,var(--surface),transparent 18%)}.footer-mega .newsletter{grid-column:1/3}.footer-mega .footer-legal{grid-column:3/5}.footer-statement{max-width:820px}.footer-statement p{font:500 clamp(1.55rem,3vw,3.5rem)/1.08 var(--font-display);margin:.5rem 0}.footer-cta{display:grid;grid-template-columns:1.2fr .8fr auto;gap:var(--space-lg);background:var(--primary);color:#fff}.footer-cta .eyebrow,.footer-cta .footer-legal,.footer-cta a{color:#fff}.footer-hub{display:grid;grid-template-columns:1fr .7fr .7fr .7fr;gap:var(--space-lg)}.footer-product{display:grid;grid-template-columns:.7fr 1.3fr;gap:var(--space-lg);background:color-mix(in srgb,var(--secondary),var(--surface) 38%)}.footer-product-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.footer-product-grid article{padding:1rem;min-height:210px}.footer-product .footer-legal{grid-column:1/-1}.footer-contextual{display:grid;grid-template-columns:1fr .9fr .8fr .7fr;gap:var(--space-lg)}.footer-invisible{padding-top:1rem;padding-bottom:1rem;border-top:0;background:transparent}.footer-invisible .footer-legal{width:100%;justify-content:center}.footer-proof{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem}.footer-proof span{display:grid;border-top:1px solid currentColor;padding-top:.75rem}.footer-proof strong{font:800 clamp(2rem,4vw,4rem)/1 var(--font-display)}.newsletter{display:grid;gap:.65rem;min-width:min(100%,320px)}address{font-style:normal;color:var(--muted)}
 .briefing-hero{display:grid;grid-template-columns:.86fr 1.14fr;gap:var(--space-lg);align-items:stretch;min-height:calc(100vh - 84px);background:var(--ink);color:var(--surface)}.briefing-left{display:grid;align-content:center}.briefing-left p{color:color-mix(in srgb,var(--surface),transparent 18%)}.briefing-dossier{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;align-content:center}.briefing-dossier article{border:0;background:color-mix(in srgb,var(--surface),transparent 92%);color:var(--surface);box-shadow:none;padding:clamp(1rem,2.4vw,2rem)}.briefing-dossier h2{font-size:clamp(1.35rem,2vw,2.35rem)}.professional-proof-split{display:grid;grid-template-columns:.9fr 1fr;gap:var(--space-lg);align-items:center}.professional-proof-split img{height:680px;width:100%;object-fit:cover}.authority-hero{display:grid;grid-template-columns:1.1fr .72fr;gap:var(--space-lg);align-items:end;min-height:72vh;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--secondary),var(--surface) 55%))}.authority-card{padding:var(--space-lg);background:var(--ink);color:var(--surface);border:0;box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 82%)}.authority-card h2{font-size:clamp(1.55rem,2.45vw,3rem)}.authority-columns{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md)}.authority-columns article{border:0;box-shadow:none;background:transparent;border-top:1px solid color-mix(in srgb,var(--ink),transparent 84%);border-radius:0}.booking-home{display:grid;grid-template-columns:1fr minmax(320px,.54fr) .72fr;gap:var(--space-lg);align-items:center;background:var(--ink);color:var(--surface)}.booking-home figure img{height:680px;width:100%;object-fit:cover}.booking-card{display:grid;gap:.8rem;padding:var(--space-md);background:var(--surface);color:var(--ink);box-shadow:0 30px 90px color-mix(in srgb,#000,transparent 78%)}.care-trust-home{display:grid;grid-template-columns:.82fr 1fr .72fr;gap:var(--space-lg);align-items:center;background:color-mix(in srgb,var(--secondary),var(--surface) 54%)}.care-trust-home figure img{height:680px;width:100%;object-fit:cover}.care-trust-panel{padding:var(--space-md);border:0;box-shadow:0 24px 80px color-mix(in srgb,var(--ink),transparent 88%)}.software-demo-home{display:grid;grid-template-columns:.78fr 1.22fr;gap:var(--space-lg);align-items:center;min-height:calc(100vh - 84px);background:var(--ink);color:var(--surface)}.product-preview{display:grid;gap:1rem;padding:var(--space-md);background:linear-gradient(145deg,color-mix(in srgb,var(--surface),transparent 88%),color-mix(in srgb,var(--primary),transparent 78%));box-shadow:0 40px 100px color-mix(in srgb,#000,transparent 72%)}.preview-bar{height:14px;width:38%;border-radius:999px;background:color-mix(in srgb,var(--surface),transparent 35%)}.product-preview article{display:grid;grid-template-columns:.42fr 1fr;gap:1rem;border:0;background:color-mix(in srgb,var(--surface),transparent 92%);color:var(--surface)}.learning-outcome-home{display:grid;grid-template-columns:.85fr .78fr .72fr;gap:var(--space-lg);align-items:center;background:var(--secondary)}.learning-outcome-home figure img{height:680px;width:100%;object-fit:cover}.outcome-ladder{display:grid;gap:.85rem}.outcome-ladder article{border:0;background:var(--surface);box-shadow:0 18px 60px color-mix(in srgb,var(--ink),transparent 90%)}.local-service-home{display:grid;grid-template-columns:1fr .72fr;gap:var(--space-lg);align-items:end;min-height:72vh;background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 48%),var(--surface))}.local-proof-map{display:grid;gap:.85rem;padding:var(--space-lg);background:var(--ink);color:var(--surface);box-shadow:0 30px 100px color-mix(in srgb,var(--ink),transparent 78%)}.local-proof-map strong{font:800 clamp(2rem,5vw,5rem)/1 var(--font-display)}.local-proof-map span{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid color-mix(in srgb,var(--surface),transparent 72%);padding-top:.8rem}.local-proof-map b{font-size:1.6rem}
-[data-motion-ready] .reveal{will-change:transform,opacity;transition-delay:var(--reveal-delay,0ms)}[data-motion-ready] .reveal:nth-child(2n){--reveal-delay:70ms}[data-motion-ready] .reveal:nth-child(3n){--reveal-delay:140ms}.motion-word{display:inline-block;opacity:0;transform:translateY(.75em);transition:opacity .65s ease,transform .65s cubic-bezier(.2,.8,.2,1);transition-delay:calc(var(--word-index,0)*42ms)}.visible .motion-word,.motion-title.visible .motion-word{opacity:1;transform:none}.motion-media{overflow:hidden;transform:translate3d(0,var(--motion-y,0),0);transition:filter .45s ease}.motion-media img,.motion-media{will-change:transform}.motion-media img{transform:scale(1.055);transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}.motion-media.visible img,.visible.motion-media img{transform:scale(1)}.parallax-soft{transform:translate3d(0,var(--parallax-y,0),0)}.parallax-deep{transform:translate3d(0,var(--parallax-y-deep,0),0)}.section-inview{--section-progress:1}.site-header{transition:transform .35s ease,background .35s ease}.site-header.header-hidden{transform:translateY(-105%)}.magnetic-hover{transition:transform .22s ease}.magnetic-hover:hover{transform:translateY(-3px)}.service-row.active{background:color-mix(in srgb,var(--secondary),transparent 60%)}.scroll-progress{box-shadow:0 0 18px color-mix(in srgb,var(--accent),transparent 25%)}h1{font-size:clamp(2.8rem,5.2vw,6.1rem);line-height:1.02;word-spacing:.08em}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1{font-size:clamp(3rem,5.9vw,6.3rem);line-height:1.01;max-width:880px}.professional-hero .motion-word{margin-right:.12em}.professional-hero .motion-word:last-child{margin-right:0}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal,.motion-word{opacity:1!important;transform:none!important}.parallax-soft,.parallax-deep,.motion-media{transform:none!important}}@media(max-width:1050px){.header-split,.header-editorial,.footer-utility,.footer-doormat,.footer-mega,.footer-cta,.footer-hub,.footer-product,.footer-contextual,.story-split-page,.home-image-depth,.home-benefit-board,.home-proof-depth,.home-faq-depth,.education-proof-panel,.product-signal-board,.briefing-hero,.professional-proof-split,.authority-hero,.booking-home,.care-trust-home,.software-demo-home,.learning-outcome-home,.local-service-home{grid-template-columns:1fr}.footer-mega .newsletter,.footer-mega .footer-legal,.footer-product .footer-legal{grid-column:auto}.header-split .brand{justify-self:start}.header-editorial>p{display:none}.story-split-page img{height:460px;order:-1}.home-benefit-board aside{position:static}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:repeat(2,1fr)}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:460px}}@media(max-width:680px){.story-split-page h1{font-size:clamp(2.2rem,14vw,3.7rem)}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1,h1{font-size:clamp(2.45rem,12vw,4rem);line-height:1.04}.story-split-page img{height:340px}.site-header{align-items:flex-start}.header-brand-row,.header-actions,.footer-minimal{align-items:flex-start;flex-direction:column}.brand{max-width:100%}.theme-toggle{width:44px;height:44px}.brand-logo-hero{height:64px;max-width:220px}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:1fr}.faq-columns{columns:1}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:340px}}`;
+.header-sidebar{position:fixed;left:1rem;top:1rem;bottom:1rem;width:min(250px,calc(100vw - 2rem));align-content:start;display:grid;grid-template-columns:1fr;justify-content:start;border:0;border-radius:var(--radius-lg);box-shadow:0 24px 80px color-mix(in srgb,var(--ink),transparent 86%)}.header-sidebar nav{display:grid;gap:.2rem}.header-sidebar~main,.header-sidebar~main+footer{margin-left:min(282px,28vw)}.header-overlay{position:fixed;top:1rem;left:50%;transform:translateX(-50%);width:min(1120px,calc(100vw - 2rem));border:0;border-radius:999px;box-shadow:0 20px 70px color-mix(in srgb,var(--ink),transparent 88%)}.header-overlay .header-note{font-size:.8rem;color:var(--muted);font-weight:800}.menu-toggle{display:none;background:transparent;color:inherit;padding:.4rem;width:44px}.menu-toggle span{display:block;height:2px;background:currentColor;margin:.24rem 0}.single-section{scroll-margin-top:110px}.single-proof{display:grid;grid-template-columns:.9fr 1.1fr;gap:var(--space-lg);align-items:center;background:var(--ink);color:var(--surface)}.single-proof blockquote{background:color-mix(in srgb,var(--surface),transparent 90%);color:var(--surface);border:0}.single-contact{display:grid;grid-template-columns:.85fr .72fr;gap:var(--space-lg);align-items:start;background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 45%),var(--surface))}.single-contact address{margin-top:1rem;color:var(--muted)}
+[data-motion-ready] .reveal{will-change:transform,opacity;transition-delay:var(--reveal-delay,0ms)}[data-motion-ready] .reveal:nth-child(2n){--reveal-delay:70ms}[data-motion-ready] .reveal:nth-child(3n){--reveal-delay:140ms}.motion-word{display:inline-block;opacity:0;transform:translateY(.75em);transition:opacity .65s ease,transform .65s cubic-bezier(.2,.8,.2,1);transition-delay:calc(var(--word-index,0)*42ms)}.visible .motion-word,.motion-title.visible .motion-word{opacity:1;transform:none}.motion-media{overflow:hidden;transform:translate3d(0,var(--motion-y,0),0);transition:filter .45s ease}.motion-media img,.motion-media{will-change:transform}.motion-media img{transform:scale(1.055);transition:transform 1.1s cubic-bezier(.2,.8,.2,1)}.motion-media.visible img,.visible.motion-media img{transform:scale(1)}.parallax-soft{transform:translate3d(0,var(--parallax-y,0),0)}.parallax-deep{transform:translate3d(0,var(--parallax-y-deep,0),0)}.section-inview{--section-progress:1}.site-header{transition:transform .35s ease,background .35s ease}.site-header.header-hidden{transform:translateY(-105%)}.magnetic-hover{transition:transform .22s ease}.magnetic-hover:hover{transform:translateY(-3px)}.service-row.active{background:color-mix(in srgb,var(--secondary),transparent 60%)}.scroll-progress{box-shadow:0 0 18px color-mix(in srgb,var(--accent),transparent 25%)}h1{font-size:clamp(2.8rem,5.2vw,6.1rem);line-height:1.02;word-spacing:.08em}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1{font-size:clamp(3rem,5.9vw,6.3rem);line-height:1.01;max-width:880px}.professional-hero .motion-word{margin-right:.12em}.professional-hero .motion-word:last-child{margin-right:0}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.reveal,.motion-word{opacity:1!important;transform:none!important}.parallax-soft,.parallax-deep,.motion-media{transform:none!important}}@media(max-width:1050px){.header-split,.header-editorial,.footer-utility,.footer-doormat,.footer-mega,.footer-cta,.footer-hub,.footer-product,.footer-contextual,.story-split-page,.home-image-depth,.home-benefit-board,.home-proof-depth,.home-faq-depth,.education-proof-panel,.product-signal-board,.briefing-hero,.professional-proof-split,.authority-hero,.booking-home,.care-trust-home,.software-demo-home,.learning-outcome-home,.local-service-home,.single-proof,.single-contact{grid-template-columns:1fr}.header-sidebar{position:sticky;top:0;bottom:auto;left:0;width:100%;border-radius:0}.header-sidebar~main,.header-sidebar~main+footer{margin-left:0}.header-overlay{top:.5rem}.footer-mega .newsletter,.footer-mega .footer-legal,.footer-product .footer-legal{grid-column:auto}.header-split .brand{justify-self:start}.header-editorial>p,.header-note{display:none}.story-split-page img{height:460px;order:-1}.home-benefit-board aside{position:static}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:repeat(2,1fr)}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:460px}}@media(max-width:680px){.story-split-page h1{font-size:clamp(2.2rem,14vw,3.7rem)}.professional-hero h1,.software-hero h1,.portfolio-hero h1,.event-hero h1,h1{font-size:clamp(2.45rem,12vw,4rem);line-height:1.04}.story-split-page img{height:340px}.site-header{align-items:flex-start}.header-brand-row,.header-actions,.footer-minimal{align-items:flex-start;flex-direction:column}.brand{max-width:100%}.theme-toggle{width:44px;height:44px}.brand-logo-hero{height:64px;max-width:220px}.home-benefit-board>div,.stats-depth,.footer-proof,.footer-product-grid,.briefing-dossier,.authority-columns{grid-template-columns:1fr}.faq-columns{columns:1}.home-image-depth img,.professional-proof-split img,.booking-home figure img,.care-trust-home figure img,.learning-outcome-home figure img{height:340px}}`;
 }
 
 function premiumJsV2() {
@@ -1873,6 +1981,10 @@ function articleSchema(site) {
 }
 
 function sitemap(site) {
+  if (site.templateProfile?.mode === 'onePage' || site.templateProfile?.mode === 'campaign') {
+    const pages = ['index.html', 'privacy.html'];
+    return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages.map((p) => `<url><loc>https://${site.domain}/${p}</loc><lastmod>${today()}</lastmod></url>`).join('')}</urlset>`;
+  }
   const pages = site.blueprint?.pages?.length ? site.blueprint.pages.map((pageItem) => pageFileName(pageItem)).concat(['blog-post.html', 'privacy.html']) : ['index.html', 'about.html', 'team.html', 'services.html', 'blog.html', 'blog-post.html', 'contact.html', 'privacy.html'];
   return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages.map((p) => `<url><loc>https://${site.domain}/${p}</loc><lastmod>${today()}</lastmod></url>`).join('')}</urlset>`;
 }
