@@ -276,6 +276,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
   applyClientAnswers(site);
   progress({ status: 'running', progress: 22, message: 'Building SEO keyword map and density targets' });
   applySeoKeywordStrategy(site);
+  site.designIntelligence = buildDesignIntelligence(site);
   progress({ status: 'running', progress: 24, message: 'Infusing keywords naturally into page content' });
   const imageResult = await generateSiteImages(site, outDir, progress);
   site.assetMap = imageResult.assetMap || {};
@@ -766,7 +767,9 @@ function imageUrl(site, purpose, w = 1200, h = 900) {
       'https://images.unsplash.com/photo-1497366754035-f200968a6e72',
       'https://images.unsplash.com/photo-1553877522-43269d4ea984',
       'https://images.unsplash.com/photo-1551434678-e076c223a692',
-      'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4'
+      'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4',
+      'https://images.unsplash.com/photo-1551836022-d5d88e9218df',
+      'https://images.unsplash.com/photo-1556761175-b413da4baf72'
     ],
     fitness: [
       'https://images.unsplash.com/photo-1534438327276-14e5300c3a48',
@@ -1210,16 +1213,15 @@ function careHome(site, pageItem) {
 }
 
 function professionalHome(site, pageItem) {
-  const variant = site.designVariant % 3;
-  const form = heroLeadForm(site, 'Confidential enquiry');
-  const visual = `<figure class="professional-visual reveal"><img src="${imageUrl(site, `professional advisory hero ${site.brief.industry} ${site.generationSeed}`, 1200, 920)}" alt="${esc(site.brief.businessName)} professional advisory visual"><figcaption>${esc(site.content.microcopy.bookingReassurance || site.content.localProof)}</figcaption></figure>`;
-  const copy = `<aside class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Request consultation')}</a></aside>`;
-  const hero = variant === 0
-    ? `<section class="professional-hero professional-hero-visual professional-hero-form">${copy}${visual}${form}</section>`
-    : variant === 1
-      ? `<section class="professional-hero professional-hero-visual professional-hero-form professional-hero-form-left">${form}${copy}${visual}</section>`
-      : `<section class="professional-hero professional-hero-visual professional-hero-form professional-hero-wide">${copy}${form}${visual}</section>`;
-  return `${hero}
+  const psyche = site.designIntelligence || buildDesignIntelligence(site);
+  const lead = site.content.stats[0];
+  const heroImage = imageUrl(site, `classical professional boardroom confidential advisory ${site.brief.industry} ${site.generationSeed}`, 1200, 900);
+  return `<section class="professional-client-hero">
+    <div class="professional-copy reveal"><p class="eyebrow">${esc(psyche.visitorState)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><div class="hero-actions"><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Request consultation')}</a><a class="text-link" href="services.html">View advisory routes</a></div></div>
+    <div class="professional-action-stack reveal"><figure class="professional-visual"><img src="${heroImage}" alt="${esc(site.brief.businessName)} professional advisory meeting"><figcaption>${esc(psyche.reassurance)}</figcaption></figure>${heroLeadForm(site, 'Confidential first step')}</div>
+    <aside class="hero-proof-card reveal"><span>${esc(lead?.value || '24')}</span><strong>${esc(lead?.label || 'hour response aim')}</strong><p>${esc(psyche.conversionReason)}</p></aside>
+  </section>
+  <section class="client-psychology-section"><div class="section-heading reveal"><p class="eyebrow">Designed around the visitor decision</p><h2>${esc(psyche.strategyHeadline)}</h2><p>${esc(psyche.strategyText)}</p></div><div class="decision-stack">${psyche.decisionCards.map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(item.title)}</h3><p>${esc(item.text)}</p></article>`).join('')}</div></section>
   <section class="professional-intelligence"><div class="section-heading reveal"><p class="eyebrow">Why this matters</p><h2>${esc(site.content.brandThesis)}</h2><p>${esc(site.content.localProof)}</p></div><div class="decision-stack">${site.content.processSteps.slice(0, 4).map((step, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></article>`).join('')}</div></section>
   <section class="proof-ledger">${site.content.differentiators.slice(0, 3).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>
   <section class="practice-matrix">${site.content.services.slice(0, 6).map((s, i) => serviceRichCard(site, s, i, 'advisory route')).join('')}</section>`;
@@ -1227,6 +1229,33 @@ function professionalHome(site, pageItem) {
 
 function heroLeadForm(site, title = 'Start here') {
   return `<form method="post" action="admin/contact.php" class="hero-lead-form reveal" data-secure-form><input type="hidden" name="_csrf" value=""><p class="eyebrow">${esc(title)}</p><h2>${esc(site.content.conversionPrompts[0]?.title || 'Tell us what is happening')}</h2><label>Name<input name="name" autocomplete="name" required></label><label>Email<input type="email" name="email" autocomplete="email" required></label><label>Message<textarea name="message" required placeholder="${esc(site.content.microcopy.contactHint || 'Briefly describe what you need help with.')}"></textarea></label><button class="button">${esc(site.content.conversionPrompts[0]?.cta || 'Send enquiry')}</button><small>${esc(site.content.microcopy.bookingReassurance || 'A short message is enough to begin.')}</small></form>`;
+}
+
+function buildDesignIntelligence(site) {
+  const nature = projectNature(site);
+  if (nature === 'professional') {
+    return {
+      visitorState: 'For directors under pressure',
+      reassurance: 'Private, practical and calm. The page is designed to reduce anxiety before asking for contact details.',
+      conversionReason: 'A discreet first message should feel safer than a public commitment.',
+      strategyHeadline: 'A visitor is not looking for decoration. They are looking for control, discretion, and a first safe step.',
+      strategyText: 'The page therefore keeps the first screen balanced: clear professional copy on one side, a calm image and short enquiry form on the other, with proof close enough to answer hesitation before the visitor scrolls.',
+      decisionCards: [
+        { title: 'Reduce fear first', text: 'The copy avoids panic language and frames the next step as a confidential conversation.' },
+        { title: 'Show competence early', text: 'Trust signals and advisory routes appear before dense service detail, so the visitor can quickly judge fit.' },
+        { title: 'Make enquiry feel small', text: 'The form asks only for essentials and reassures the visitor that a short outline is enough.' },
+        { title: 'Keep proof near action', text: 'Stats, process notes, and service routes support the decision without overwhelming the first screen.' }
+      ]
+    };
+  }
+  return {
+    visitorState: site.blueprint?.audience || 'For the right visitor',
+    reassurance: site.content.microcopy?.bookingReassurance || site.content.localProof || 'Clear information before a simple next step.',
+    conversionReason: site.blueprint?.primaryGoal || site.content.microcopy?.contactHint || 'The page keeps the next action obvious.',
+    strategyHeadline: `A ${nature} website should be shaped around what the visitor is trying to decide.`,
+    strategyText: site.blueprint?.visualStrategy || site.content.localProof || site.content.hero.subtext,
+    decisionCards: site.content.differentiators.slice(0, 4).map((item) => ({ title: item.title, text: item.text }))
+  };
 }
 
 function fitnessHome(site, pageItem) {
@@ -1630,8 +1659,9 @@ h1{word-spacing:normal}
 .professional-visual img,.software-visual img{background:var(--secondary)}
 .professional-intelligence .section-heading h2{max-width:980px}
 .site-header nav{align-items:center}.site-header nav>a,.mega-trigger>button{position:relative;background:transparent;color:inherit;border:0;padding:.65rem .15rem;font:inherit;font-weight:800;cursor:pointer}.site-header nav>a:after,.mega-trigger>button:after{content:"";position:absolute;left:0;right:100%;bottom:.28rem;height:2px;background:var(--accent);transition:right .22s ease}.site-header nav>a:hover:after,.mega-trigger:hover>button:after,.mega-trigger.is-open>button:after{right:0}.mega-trigger{position:relative;display:inline-flex}.mega-menu{position:absolute;top:calc(100% + 18px);left:50%;z-index:40;width:min(760px,calc(100vw - 2rem));display:grid;grid-template-columns:1.05fr 1fr 1fr;gap:.85rem;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 10%);border:1px solid var(--line);box-shadow:0 28px 80px color-mix(in srgb,var(--ink),transparent 84%);transform:translate(-50%,10px);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}.mega-menu a,.mega-menu>span{display:grid;gap:.3rem;padding:.9rem;text-decoration:none;background:color-mix(in srgb,var(--secondary),var(--surface) 72%);border-radius:var(--radius-sm)}.mega-menu small,.mega-menu em{font-size:.85rem;color:var(--muted);font-style:normal;line-height:1.45}.mega-menu .mega-cta{background:var(--primary);color:#fff;align-content:center;text-align:center;font-weight:900}.professional-hero-form{grid-template-columns:minmax(0,.95fr) minmax(340px,.72fr) minmax(300px,.55fr);align-items:center}.professional-hero-form-left{grid-template-columns:minmax(300px,.55fr) minmax(0,.95fr) minmax(340px,.72fr)}.professional-hero-wide{grid-template-columns:minmax(0,1fr) minmax(320px,.6fr);grid-template-areas:"copy form" "visual visual"}.professional-hero-wide aside{grid-area:copy}.professional-hero-wide .hero-lead-form{grid-area:form}.professional-hero-wide .professional-visual{grid-area:visual}.hero-lead-form{display:grid;gap:.85rem;padding:clamp(1.1rem,2.4vw,1.7rem);background:color-mix(in srgb,var(--surface),#fff 18%);border:1px solid var(--line);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 84%);border-radius:var(--radius-lg)}.hero-lead-form h2{font-size:clamp(1.45rem,2.1vw,2.35rem);margin:0}.hero-lead-form input,.hero-lead-form textarea{background:color-mix(in srgb,var(--surface),#fff 16%)}.hero-lead-form textarea{min-height:110px}.hero-lead-form small{color:var(--muted);line-height:1.45}.hero-lead-form.is-sent{outline:3px solid color-mix(in srgb,var(--accent),transparent 35%)}
-@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
-@media(max-width:680px){.professional-hero-visual h1,.software-hero h1{font-size:clamp(2.35rem,11vw,3.8rem);line-height:1.05}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}}
+.professional-client-hero{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.92fr);gap:clamp(1.5rem,4vw,4.5rem);align-items:center;min-height:calc(100vh - 84px);padding-top:clamp(3rem,6vw,5rem);padding-bottom:clamp(3rem,6vw,5rem);background:linear-gradient(90deg,color-mix(in srgb,var(--surface),#fff 12%),color-mix(in srgb,var(--secondary),var(--surface) 65%))}.professional-client-hero h1{font-size:clamp(2.7rem,4.75vw,5.45rem)!important;line-height:1.02!important;max-width:760px!important;letter-spacing:0}.professional-client-hero .lede{font-size:clamp(1.05rem,1.35vw,1.28rem);max-width:720px;color:var(--muted)}.professional-copy{display:grid;gap:var(--space-sm);align-content:center}.hero-actions{display:flex;gap:.9rem;flex-wrap:wrap;align-items:center}.professional-action-stack{display:grid;grid-template-columns:1fr;gap:1rem;align-self:stretch}.professional-action-stack .professional-visual{min-height:0}.professional-action-stack .professional-visual img{height:clamp(260px,34vh,420px);width:100%;object-fit:cover;border-radius:var(--radius-lg) var(--radius-lg) 0 0}.professional-action-stack .professional-visual figcaption{padding:.85rem 1rem;border:1px solid var(--line);border-top:0;background:var(--surface);border-radius:0 0 var(--radius-lg) var(--radius-lg);max-width:none}.professional-action-stack .hero-lead-form{border-radius:var(--radius-lg);box-shadow:0 22px 70px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card{position:absolute;left:clamp(1rem,6vw,6rem);bottom:clamp(1rem,4vw,2.2rem);max-width:340px;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 18%);border:1px solid var(--line);box-shadow:0 20px 60px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card span{display:block;font:800 clamp(2.2rem,4vw,4rem)/1 var(--font-display);color:var(--primary)}.hero-proof-card strong{display:block}.hero-proof-card p{margin:.35rem 0 0;color:var(--muted);font-size:.95rem}.client-psychology-section{display:grid;grid-template-columns:.8fr 1.2fr;gap:var(--space-lg);align-items:start;background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.client-psychology-section .decision-stack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}
+@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide,.professional-client-hero,.client-psychology-section{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.hero-proof-card{position:static;max-width:none}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
+@media(max-width:680px){.professional-hero-visual h1,.software-hero h1,.professional-client-hero h1{font-size:clamp(2.25rem,10vw,3.55rem)!important;line-height:1.06!important}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}.client-psychology-section .decision-stack{grid-template-columns:1fr}.professional-client-hero{min-height:auto}}
 `;
 }
 
