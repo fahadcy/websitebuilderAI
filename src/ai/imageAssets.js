@@ -54,7 +54,13 @@ export async function generateSiteImages(site, outDir, progress = () => {}) {
   const imageDir = path.join(outDir, 'assets', 'images');
   await fs.mkdir(imageDir, { recursive: true });
   if (!enabled || !client) {
-    return createFallbackImages(site, imageDir, imagePlan, assetMap, generatedImages, enabled ? 'OPENAI_API_KEY is missing or image client is unavailable' : 'AI image generation disabled');
+    return {
+      imagePlan,
+      assetMap,
+      generatedImages,
+      skipped: true,
+      reason: enabled ? 'OPENAI_API_KEY is missing or image client is unavailable; using curated photographic URLs in generated pages.' : 'AI image generation disabled; using curated photographic URLs in generated pages.'
+    };
   }
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';

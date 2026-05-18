@@ -8,7 +8,7 @@ async function jsonCompletion(system, prompt) {
   if (!client) return null;
   try {
     const response = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o',
       temperature: 0.65,
       response_format: { type: 'json_object' },
       messages: [
