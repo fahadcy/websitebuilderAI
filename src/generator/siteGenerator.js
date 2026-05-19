@@ -177,7 +177,8 @@ function applySeoKeywordStrategy(site) {
   site.content.faqs = site.content.faqs.map((faq, index) => {
     const topic = site.content.services[index % Math.max(site.content.services.length, 1)]?.title;
     if (!topic || /local|nearby|Manchester/i.test(faq.answer)) return faq;
-    return { ...faq, answer: `${faq.answer} This gives local visitors another practical way to compare ${topic.toLowerCase()} options before booking.` };
+    const action = projectNature(site) === 'professional' ? 'before making an enquiry' : 'before booking';
+    return { ...faq, answer: `${faq.answer} This gives local visitors another practical way to compare ${topic.toLowerCase()} options ${action}.` };
   });
   if (site.content.faqs[0]) {
     site.content.faqs[0].answer = ensureNaturalKeyword(site.content.faqs[0].answer, primary, `That matters for anyone looking for ${primary}.`);
@@ -577,10 +578,103 @@ function applyNatureContentCorrections(site) {
   const prompt = String(site.metadata?.prompt || '').toLowerCase();
   const genericServiceTitles = (site.content.services || []).map((service) => String(service.title || '').toLowerCase()).join(' ');
   const genericCopy = /professional services|clearer way to choose|consultation planning delivery support/.test(`${site.brief.industry} ${site.content.hero?.headline} ${genericServiceTitles}`.toLowerCase());
-  if (!genericCopy && !/tutor|tuition|gcse|shoe|restaurant|clinic|software|property/.test(prompt)) return;
+  if (!genericCopy && !/tutor|tuition|gcse|shoe|restaurant|clinic|software|property|corporate|law|legal|solicitor|insolvency|restructuring|accountant|accounting|consultant|consultancy|advisory/.test(prompt)) return;
   if (nature === 'education') applyEducationContent(site);
   if (nature === 'commerce' && /shoe|footwear|fashion|sale|shop|retail/.test(prompt)) applyShoeCommerceContent(site);
   if (nature === 'hospitality') applyHospitalityContent(site);
+  if (nature === 'professional') applyProfessionalContent(site);
+}
+
+function applyProfessionalContent(site) {
+  const prompt = String(site.metadata?.prompt || '').toLowerCase();
+  site.brief.location = inferPromptLocation(site.metadata?.prompt, site.brief.location);
+  const isLegal = /law|legal|solicitor|firm|litigation|contract|employment/.test(prompt);
+  const isFinance = /insolvency|restructuring|financial distress|creditor|director|liquidation|administration/.test(prompt);
+  const isAccounting = /accountant|accounting|tax|bookkeeping|payroll|audit/.test(prompt);
+  const industry = isLegal ? 'Law firm' : isFinance ? 'Business advisory and insolvency' : isAccounting ? 'Accounting and tax advisory' : 'Professional advisory';
+  const primary = isLegal ? 'legal advice' : isFinance ? 'business advisory' : isAccounting ? 'accounting advice' : 'professional advice';
+  const routes = isLegal
+    ? ['Commercial law', 'Employment advice', 'Contract review', 'Dispute resolution', 'Business legal support']
+    : isFinance
+      ? ['Insolvency advice', 'Business restructuring', 'Director consultation', 'Creditor negotiation', 'Recovery planning']
+      : isAccounting
+        ? ['Tax planning', 'Accounts preparation', 'Payroll support', 'Business bookkeeping', 'Cashflow advice']
+        : ['Strategic consultation', 'Business planning', 'Implementation support', 'Ongoing advisory', 'Risk review'];
+  site.brief.industry = industry;
+  site.brief.seoKeywords = {
+    primary: [`${primary} in ${site.brief.location}`, `${site.brief.location} ${primary}`, `${site.brief.businessName} ${primary}`],
+    secondary: routes.map((route) => `${route} ${site.brief.location}`),
+    localModifiers: [site.brief.location, `near ${site.brief.location}`, 'confidential', 'specialist']
+  };
+  site.content.seoStrategy = {
+    primaryKeywords: site.brief.seoKeywords.primary,
+    secondaryKeywords: site.brief.seoKeywords.secondary,
+    localModifiers: site.brief.seoKeywords.localModifiers,
+    pageKeywordMap: {
+      Home: site.brief.seoKeywords.primary,
+      Services: site.brief.seoKeywords.secondary,
+      Contact: [`${site.brief.businessName} contact`, `${primary} in ${site.brief.location}`]
+    },
+    densityTargets: { primary: '0.7-1.1%', secondary: '0.2-0.5%' },
+    naturalUsageNotes: 'Professional keywords are used around trust, risk, and decision-making rather than repeated mechanically.'
+  };
+  const pressure = isLegal ? 'legal decisions' : isFinance ? 'financial pressure' : isAccounting ? 'tax, accounts, and cashflow decisions' : 'important business decisions';
+  site.content.hero = {
+    ...site.content.hero,
+    kicker: `${site.brief.location} ${industry.toLowerCase()}`,
+    headline: `${site.brief.businessName} gives clear advice when ${pressure} need a calm next step.`,
+    subtext: `${site.brief.businessName} helps clients in ${site.brief.location} understand their options, reduce uncertainty, and act with confidence before decisions become harder to control.`,
+    primaryCta: isLegal ? 'Book a legal enquiry' : isFinance ? 'Start a confidential enquiry' : 'Book a first conversation',
+    secondaryCta: 'View specialist routes'
+  };
+  site.content.services = routes.map((title) => ({
+    title,
+    description: `${title} is explained in plain English, with practical options, risk points, likely next steps, and the information needed before ${site.brief.businessName} recommends a route.`,
+    bullets: ['Clear first assessment', 'Practical options before commitment', 'Confidential next-step guidance'],
+    outcome: 'Visitors understand what to do next without feeling pushed.'
+  }));
+  site.content.differentiators = [
+    { title: 'Confidential from the first message', text: `${site.brief.businessName} makes the first enquiry feel controlled, private, and easy to start.` },
+    { title: 'Advice before action', text: 'The website positions decisions around options, risks, timing, and clarity rather than pressure or hard selling.' },
+    { title: 'Local credibility with specialist focus', text: `The content connects ${site.brief.location} search intent with credible professional expertise and practical proof.` },
+    { title: 'Clear route to enquiry', text: 'Calls to action, proof, service routes, and the contact form are placed around the visitor’s decision process.' }
+  ];
+  site.content.trustSignals = [`${site.brief.location}-based specialists`, 'Confidential first conversation', 'Clear options before commitment', 'Senior-led advice'];
+  site.content.localProof = `Based in ${site.brief.location}, ${site.brief.businessName} is positioned for people who need ${primary}, discretion, and a clear first step.`;
+  site.content.microcopy.contactHint = `Briefly explain the situation, the deadline if there is one, and what you need from ${site.brief.businessName}.`;
+  site.content.microcopy.bookingReassurance = 'A short confidential message is enough to begin. No pressure, no public commitment, and no assumptions before the situation is understood.';
+  site.content.brandThesis = `${site.brief.businessName} is built for visitors who need trustworthy professional guidance, credible proof, and a calm route from uncertainty to action.`;
+  site.content.conversionPrompts = [
+    { title: 'Not sure which route is right?', text: `Send a short confidential note and ${site.brief.businessName} will help identify the most sensible first step.`, cta: site.content.hero.primaryCta },
+    { title: 'Need clarity before you commit?', text: 'Start with the situation, the deadline, and the outcome you are trying to protect.', cta: 'Send an enquiry' }
+  ];
+  site.content.faqs = [
+    { question: 'What should I include in my first message?', answer: `Share the situation, any deadline, who is involved, and what outcome you need. ${site.brief.businessName} can then suggest the right next step.` },
+    { question: 'Is the first enquiry confidential?', answer: 'Yes. The first enquiry is positioned as a private starting point before any public commitment or formal instruction.' },
+    { question: 'How quickly should I ask for advice?', answer: 'Earlier is usually better. Clear advice before deadlines, disputes, or financial pressure escalate can keep more options open.' },
+    { question: 'Do I need documents ready?', answer: 'Helpful documents can be shared later. A short overview is enough to begin the conversation.' },
+    { question: 'Can you explain the options clearly?', answer: `${site.brief.businessName} is presented around practical options, risk points, and plain-English next steps rather than jargon.` }
+  ];
+  site.content.stats = [
+    { value: '24', label: 'hour response aim' },
+    { value: String(routes.length), label: 'specialist service routes' },
+    { value: '100', label: 'confidential first enquiries' }
+  ];
+  site.content.processSteps = [
+    { title: 'Understand the situation', text: 'The first step captures the pressure, deadline, parties involved, and the decision that needs to be made.' },
+    { title: 'Clarify the options', text: 'Possible routes are explained in plain English with the trade-offs, risks, and likely next steps.' },
+    { title: 'Choose a controlled path', text: 'The visitor sees a practical route forward before making a commitment.' },
+    { title: 'Keep communication clear', text: 'Updates, documents, and next actions are kept understandable so clients do not feel lost in process.' }
+  ];
+  site.content.testimonials = [
+    { quote: 'The first conversation made the options feel much clearer and less overwhelming.', name: 'Amelia R.', context: 'Business owner' },
+    { quote: 'They explained the risks plainly and helped us decide what needed attention first.', name: 'David K.', context: 'Company director' },
+    { quote: 'Professional, discreet, and practical from the first message.', name: 'Sofia M.', context: 'Private client' }
+  ];
+  site.content.blogPosts = [
+    { title: `When to ask for ${primary} before a decision becomes urgent`, intro: `A practical guide for people in ${site.brief.location} who want to understand risk, timing, and the first safe step before committing to a route.`, category: 'Guidance' },
+    { title: 'How to prepare for a confidential first conversation', intro: 'The documents, dates, and context that help a professional adviser understand the situation quickly without overwhelming you.', category: 'First steps' }
+  ];
 }
 
 function applyEducationContent(site) {
@@ -1126,7 +1220,25 @@ function pageDescription(site, pageItem, title = '') {
 }
 
 function trustPills(site) {
-  return (site.content.trustSignals || []).slice(0, 5).map((item) => `<span>${esc(item)}</span>`).join('');
+  const nature = projectNature(site);
+  const blocked = {
+    professional: /treatment|patient|home guidance|referral|clinic|appointment|pain|rehab|therapy/i,
+    education: /insolvency|director|creditor|restructuring|patient|treatment/i,
+    commerce: /insolvency|director|creditor|treatment|patient|consultation plan/i
+  }[nature] || /lorem|placeholder/i;
+  const defaults = {
+    professional: [`${site.brief.location}-based specialists`, 'Confidential first conversation', 'Clear options before commitment', 'Senior-led advice'],
+    commerce: ['Easy product enquiries', 'Clear sizing and availability', 'Fast customer support', 'Secure checkout ready'],
+    education: [`${site.brief.location}-based learning support`, 'Clear progress plan', 'Flexible lesson routes', 'Parent-friendly updates'],
+    care: ['Clear treatment plans', 'Evidence-led decisions', 'Private appointments', 'Practical aftercare'],
+    hospitality: ['Simple booking route', 'Local favourite', 'Fresh seasonal choices', 'Private event enquiries'],
+    software: ['Fast onboarding', 'Secure workflow', 'Demo-ready product', 'Scalable support'],
+    service: [`${site.brief.location}-based team`, 'Clear pricing route', 'Reliable response', 'Practical next steps']
+  };
+  const signals = (site.content.trustSignals || [])
+    .filter((item) => item && !blocked.test(item))
+    .map((item) => String(item).replace(/^Manchester-based\b/i, `${site.brief.location}-based`));
+  return [...new Set(signals.concat(defaults[nature] || defaults.service))].slice(0, 5).map((item) => `<span>${esc(item)}</span>`).join('');
 }
 
 function hashNumber(value) {
@@ -1482,15 +1594,18 @@ function professionalBriefingHome(site, pageItem) {
   const psyche = site.designIntelligence || buildDesignIntelligence(site);
   return `<section class="briefing-hero">
     <div class="briefing-left reveal"><p class="eyebrow">${esc(psyche.visitorState)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book a confidential call')}</a></div>
+    <figure class="briefing-visual reveal"><img src="${imageUrl(site, `corporate advisory office ${site.brief.industry} ${site.generationSeed}`, 1000, 1180)}" alt="${esc(site.brief.businessName)} corporate advisory environment"><figcaption>${esc(psyche.reassurance)}</figcaption></figure>
     <div class="briefing-dossier reveal">${site.content.processSteps.slice(0, 4).map((step, i) => `<article><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</div>
   </section>
   <section class="professional-proof-split"><figure class="reveal"><img src="${imageUrl(site, `confidential professional meeting ${site.generationSeed}`, 1100, 820)}" alt="${esc(site.brief.businessName)} advisory meeting"></figure><div class="reveal"><p class="eyebrow">How the page earns trust</p><h2>${esc(psyche.methodHeadline)}</h2><p>${esc(site.content.brandThesis)}</p>${heroLeadForm(site, 'Send a discreet enquiry')}</div></section>`;
 }
 
 function professionalAuthorityHome(site, pageItem) {
+  const psyche = site.designIntelligence || buildDesignIntelligence(site);
   return `<section class="authority-hero">
-    <div class="reveal"><p class="eyebrow">${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p></div>
-    <div class="authority-card reveal"><h2>${esc(site.content.localProof)}</h2><div class="trust-pills">${trustPills(site)}</div><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Speak to us')}</a></div>
+    <div class="reveal"><p class="eyebrow">${esc(psyche.visitorState)}</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="hero-actions"><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Speak to us')}</a><a class="text-link" href="case-studies.html">Review proof</a></div></div>
+    <figure class="authority-visual reveal"><img src="${imageUrl(site, `corporate reception meeting advisory ${site.generationSeed}`, 1100, 920)}" alt="${esc(site.brief.businessName)} corporate consultation"><figcaption>${esc(site.content.localProof)}</figcaption></figure>
+    <div class="authority-card reveal"><h2>${esc(psyche.methodHeadline)}</h2><div class="trust-pills">${trustPills(site)}</div>${heroLeadForm(site, 'Start privately')}</div>
   </section>
   <section class="authority-columns">${site.content.differentiators.slice(0, 3).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</section>
   <section class="practice-matrix">${site.content.services.slice(0, 6).map((s, i) => serviceRichCard(site, s, i, 'specialist area')).join('')}</section>`;
@@ -1503,11 +1618,17 @@ function heroLeadForm(site, title = 'Start here') {
 function buildDesignIntelligence(site) {
   const nature = projectNature(site);
   if (nature === 'professional') {
+    const prompt = String(site.metadata?.prompt || '').toLowerCase();
+    const visitorState = /law|legal|solicitor|firm/.test(prompt)
+      ? 'For people who need clear legal options'
+      : /accountant|accounting|tax|payroll|bookkeeping/.test(prompt)
+        ? 'For businesses that need financial clarity'
+        : 'For directors under pressure';
     return {
-      visitorState: 'For directors under pressure',
+      visitorState,
       reassurance: 'Private, practical and calm. The page is designed to reduce anxiety before asking for contact details.',
       conversionReason: 'A discreet first message should feel safer than a public commitment.',
-      strategyHeadline: 'A visitor is not looking for decoration. They are looking for control, discretion, and a first safe step.',
+      strategyHeadline: 'A visitor is not looking for decoration. They are looking for clarity, discretion, and a first safe step.',
       strategyText: 'The page therefore keeps the first screen balanced: clear professional copy on one side, a calm image and short enquiry form on the other, with proof close enough to answer hesitation before the visitor scrolls.',
       methodHeadline: 'Clear advice, calm next steps, and no pressure.',
       decisionCards: [
@@ -1684,10 +1805,11 @@ function premiumAbout(site) {
 
 function premiumServices(site) {
   const c = site.content;
+  const faqTitle = projectNature(site) === 'professional' ? 'Questions people ask before making an enquiry' : 'Questions people ask before booking';
   return `<section class="page-hero"><p class="eyebrow">Services</p><h1>Choose the route that matches the problem, not a generic package.</h1><p>${esc(c.microcopy.bookingReassurance)}</p></section>
   <section class="service-showcase">${c.services.map((s, i) => `<article class="service-row reveal"><div><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(s.title)}</h2><p>${esc(s.description)}</p><p class="service-outcome">${esc(s.outcome || '')}</p></div><ul>${(s.bullets || []).map((b) => `<li>${esc(b)}</li>`).join('')}</ul></article>`).join('')}</section>
   <section class="process-band"><div class="section-heading reveal"><p class="eyebrow">Process</p><h2>Visitors should feel the method before they send the enquiry.</h2></div><ol class="process">${c.processSteps.map((step, i) => `<li class="reveal"><span>${i + 1}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></li>`).join('')}</ol></section>
-  <section class="content-narrow faq-list"><h2>Questions people ask before booking</h2>${c.faqs.map((f) => `<details><summary>${esc(f.question)}</summary><p>${esc(f.answer)}</p></details>`).join('')}</section>`;
+  <section class="content-narrow faq-list"><h2>${esc(faqTitle)}</h2>${c.faqs.map((f) => `<details><summary>${esc(f.question)}</summary><p>${esc(f.answer)}</p></details>`).join('')}</section>`;
 }
 
 function premiumTeam(site) {
@@ -2001,9 +2123,12 @@ h1{word-spacing:normal}
 .professional-hero-visual h1,.software-hero h1{max-width:980px}
 .professional-visual img,.software-visual img{background:var(--secondary)}
 .professional-intelligence .section-heading h2{max-width:980px}
+.mood-paper,.mood-contrast{background:linear-gradient(180deg,color-mix(in srgb,var(--secondary),var(--surface) 78%),var(--surface) 34rem)}
+.mood-paper main,.mood-contrast main{overflow:hidden}.mood-paper section,.mood-contrast section{position:relative}.mood-paper .button,.mood-contrast .button{box-shadow:0 16px 42px color-mix(in srgb,var(--primary),transparent 82%);transition:transform .22s ease,box-shadow .22s ease,background .22s ease}.mood-paper .button:hover,.mood-contrast .button:hover{transform:translateY(-2px);box-shadow:0 24px 64px color-mix(in srgb,var(--primary),transparent 76%)}.mood-paper img,.mood-contrast img{filter:saturate(.92) contrast(1.02)}
 .site-header nav{align-items:center}.site-header nav>a,.mega-trigger>button{position:relative;background:transparent;color:inherit;border:0;padding:.65rem .15rem;font:inherit;font-weight:800;cursor:pointer}.site-header nav>a:after,.mega-trigger>button:after{content:"";position:absolute;left:0;right:100%;bottom:.28rem;height:2px;background:var(--accent);transition:right .22s ease}.site-header nav>a:hover:after,.mega-trigger:hover>button:after,.mega-trigger.is-open>button:after{right:0}.mega-trigger{position:relative;display:inline-flex}.mega-menu{position:absolute;top:calc(100% + 18px);left:50%;z-index:40;width:min(760px,calc(100vw - 2rem));display:grid;grid-template-columns:1.05fr 1fr 1fr;gap:.85rem;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 10%);border:1px solid var(--line);box-shadow:0 28px 80px color-mix(in srgb,var(--ink),transparent 84%);transform:translate(-50%,10px);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}.mega-menu a,.mega-menu>span{display:grid;gap:.3rem;padding:.9rem;text-decoration:none;background:color-mix(in srgb,var(--secondary),var(--surface) 72%);border-radius:var(--radius-sm)}.mega-menu small,.mega-menu em{font-size:.85rem;color:var(--muted);font-style:normal;line-height:1.45}.mega-menu .mega-cta{background:var(--primary);color:#fff;align-content:center;text-align:center;font-weight:900}.professional-hero-form{grid-template-columns:minmax(0,.95fr) minmax(340px,.72fr) minmax(300px,.55fr);align-items:center}.professional-hero-form-left{grid-template-columns:minmax(300px,.55fr) minmax(0,.95fr) minmax(340px,.72fr)}.professional-hero-wide{grid-template-columns:minmax(0,1fr) minmax(320px,.6fr);grid-template-areas:"copy form" "visual visual"}.professional-hero-wide aside{grid-area:copy}.professional-hero-wide .hero-lead-form{grid-area:form}.professional-hero-wide .professional-visual{grid-area:visual}.hero-lead-form{display:grid;gap:.85rem;padding:clamp(1.1rem,2.4vw,1.7rem);background:color-mix(in srgb,var(--surface),#fff 18%);border:1px solid var(--line);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 84%);border-radius:var(--radius-lg)}.hero-lead-form h2{font-size:clamp(1.45rem,2.1vw,2.35rem);margin:0}.hero-lead-form input,.hero-lead-form textarea{background:color-mix(in srgb,var(--surface),#fff 16%)}.hero-lead-form textarea{min-height:110px}.hero-lead-form small{color:var(--muted);line-height:1.45}.hero-lead-form.is-sent{outline:3px solid color-mix(in srgb,var(--accent),transparent 35%)}
 .professional-client-hero{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.92fr);gap:clamp(1.5rem,4vw,4.5rem);align-items:center;min-height:calc(100vh - 84px);padding-top:clamp(3rem,6vw,5rem);padding-bottom:clamp(3rem,6vw,5rem);background:linear-gradient(90deg,color-mix(in srgb,var(--surface),#fff 12%),color-mix(in srgb,var(--secondary),var(--surface) 65%))}.professional-client-hero h1{font-size:clamp(2.7rem,4.75vw,5.45rem)!important;line-height:1.02!important;max-width:760px!important;letter-spacing:0}.professional-client-hero .lede{font-size:clamp(1.05rem,1.35vw,1.28rem);max-width:720px;color:var(--muted)}.professional-copy{display:grid;gap:var(--space-sm);align-content:center}.hero-actions{display:flex;gap:.9rem;flex-wrap:wrap;align-items:center}.professional-action-stack{display:grid;grid-template-columns:1fr;gap:1rem;align-self:stretch}.professional-action-stack .professional-visual{min-height:0}.professional-action-stack .professional-visual img{height:clamp(260px,34vh,420px);width:100%;object-fit:cover;border-radius:var(--radius-lg) var(--radius-lg) 0 0}.professional-action-stack .professional-visual figcaption{padding:.85rem 1rem;border:0;background:var(--surface);border-radius:0 0 var(--radius-lg) var(--radius-lg);max-width:none}.professional-action-stack .hero-lead-form{border-radius:var(--radius-lg);box-shadow:0 22px 70px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card{position:absolute;left:clamp(1rem,6vw,6rem);bottom:clamp(1rem,4vw,2.2rem);max-width:340px;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 18%);border:0;box-shadow:0 20px 60px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card span{display:block;font:800 clamp(2.2rem,4vw,4rem)/1 var(--font-display);color:var(--primary)}.hero-proof-card strong{display:block}.hero-proof-card p{margin:.35rem 0 0;color:var(--muted);font-size:.95rem}.client-psychology-section{display:grid;grid-template-columns:.8fr 1.2fr;gap:var(--space-lg);align-items:start;background:var(--surface);border:0}.client-psychology-section .decision-stack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.professional-method-section{background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 70%),var(--surface));border:0}.professional-method-section .section-heading h2,.client-psychology-section .section-heading h2{font-size:clamp(2rem,3.15vw,3.7rem)!important;line-height:1.08!important;max-width:720px}.professional-method-section .section-heading p,.client-psychology-section .section-heading p{font-size:clamp(1rem,1.15vw,1.16rem);max-width:740px}.professional-method-section .decision-stack article,.client-psychology-section .decision-stack article,.proof-ledger article,.practice-matrix article{border:0!important;outline:0!important;box-shadow:0 24px 70px color-mix(in srgb,var(--ink),transparent 91%);background:color-mix(in srgb,var(--surface),#fff 8%)}.professional-method-section .decision-stack h3,.client-psychology-section .decision-stack h3{font-size:clamp(1.35rem,1.85vw,2.15rem);line-height:1.12}.professional-method-section .decision-stack p,.client-psychology-section .decision-stack p{font-size:clamp(.98rem,1.02vw,1.08rem);line-height:1.65}
-@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide,.professional-client-hero,.client-psychology-section{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.hero-proof-card{position:static;max-width:none}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
+.briefing-hero{grid-template-columns:minmax(0,.85fr) minmax(320px,.58fr) minmax(320px,.78fr);align-items:center;gap:clamp(1.4rem,3.8vw,4rem);min-height:calc(100vh - 84px);background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 52%),var(--surface))}.briefing-left h1,.authority-hero h1{font-size:clamp(2.55rem,4.8vw,5.4rem)!important;line-height:1.03!important;max-width:760px}.briefing-left p,.authority-hero p{font-size:clamp(1rem,1.2vw,1.2rem);max-width:680px;color:var(--muted)}.briefing-visual{margin:0;align-self:stretch;display:grid;grid-template-rows:1fr auto}.briefing-visual img{height:100%;min-height:560px;width:100%;object-fit:cover;border-radius:var(--radius-lg);box-shadow:0 28px 86px color-mix(in srgb,var(--ink),transparent 86%)}.briefing-visual figcaption,.authority-visual figcaption{font-weight:800;color:var(--primary);padding:.85rem 0}.briefing-dossier{display:grid;gap:.8rem}.briefing-dossier article{border:0!important;background:color-mix(in srgb,var(--surface),#fff 10%);box-shadow:0 20px 58px color-mix(in srgb,var(--ink),transparent 91%);padding:1rem}.briefing-dossier h2{font-size:clamp(1.15rem,1.5vw,1.7rem)!important;line-height:1.15;margin:.35rem 0}.authority-hero{display:grid;grid-template-columns:minmax(0,.85fr) minmax(300px,.62fr) minmax(320px,.62fr);gap:clamp(1.4rem,4vw,4rem);align-items:center;min-height:calc(100vh - 84px);background:linear-gradient(110deg,var(--surface),color-mix(in srgb,var(--secondary),var(--surface) 58%))}.authority-visual{margin:0;align-self:stretch;display:grid;grid-template-rows:1fr auto}.authority-visual img{height:clamp(460px,68vh,720px);width:100%;object-fit:cover;border-radius:var(--radius-lg);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 86%)}.authority-card{border:0!important;background:color-mix(in srgb,var(--surface),#fff 12%);box-shadow:0 28px 86px color-mix(in srgb,var(--ink),transparent 86%);padding:clamp(1rem,2.4vw,1.65rem)}.authority-card h2{font-size:clamp(1.45rem,2.2vw,2.45rem)!important;line-height:1.12}.authority-card .hero-lead-form{box-shadow:none;border:0;background:transparent;padding:0;margin-top:1rem}.authority-columns,.practice-matrix,.proof-ledger{gap:clamp(1rem,2vw,1.4rem)}.authority-columns article,.proof-ledger article,.practice-matrix article{transition:transform .24s ease,box-shadow .24s ease}.authority-columns article:hover,.proof-ledger article:hover,.practice-matrix article:hover{transform:translateY(-4px);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 88%)}
+@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide,.professional-client-hero,.client-psychology-section,.briefing-hero,.authority-hero{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.hero-proof-card{position:static;max-width:none}.briefing-visual img,.authority-visual img{height:460px;min-height:0}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
 @media(max-width:680px){.professional-hero-visual h1,.software-hero h1,.professional-client-hero h1{font-size:clamp(2.25rem,10vw,3.55rem)!important;line-height:1.06!important}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}.client-psychology-section .decision-stack{grid-template-columns:1fr}.professional-client-hero{min-height:auto}}
 `;
 }
