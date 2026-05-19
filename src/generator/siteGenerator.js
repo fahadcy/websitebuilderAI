@@ -414,9 +414,9 @@ function applyCompanyHouseToBrief(brief, metadata = {}) {
 function headerBrandMode(site) {
   const nature = projectNature(site);
   const seed = hashNumber(`${site.generationSeed}-${site.brief.businessName}-${nature}`);
-  const logoOnlyAllowed = Boolean(site.logoFile) && !['professional', 'care', 'education'].includes(nature);
-  const showName = !logoOnlyAllowed || seed % 3 !== 0;
-  const size = nature === 'commerce' || nature === 'portfolio' ? 'large' : nature === 'professional' || nature === 'education' ? 'short' : seed % 2 ? 'medium' : 'large';
+  const hasLogo = Boolean(site.logoFile);
+  const showName = !hasLogo;
+  const size = nature === 'commerce' || nature === 'portfolio' ? 'large' : nature === 'professional' || nature === 'education' ? 'medium' : seed % 2 ? 'medium' : 'large';
   const layout = !showName ? 'logo-only' : seed % 4 === 0 ? 'stacked' : 'inline';
   return { showName, size, layout };
 }
@@ -426,7 +426,7 @@ function headerDesign(site) {
   const profile = site.templateProfile || chooseTemplateProfile(site);
   const seed = hashNumber(`${site.generationSeed}-${site.brief.businessName}-${nature}-${profile.mode}-${site.blueprint?.visualStrategy || ''}`);
   if (profile.mode === 'onePage') {
-    const onePageLayouts = ['overlay', 'sidebar', 'minimal', 'split'];
+    const onePageLayouts = nature === 'professional' ? ['minimal', 'classic', 'stacked'] : ['overlay', 'sidebar', 'minimal', 'split'];
     const brand = headerBrandMode(site);
     return { layout: onePageLayouts[seed % onePageLayouts.length], logoSize: brand.size, showName: brand.showName, brandLayout: brand.layout, cta: ctaFromGoal(site.blueprint?.primaryGoal || ''), note: profile.label };
   }
@@ -451,8 +451,7 @@ function headerDesign(site) {
   const layout = choices[seed % choices.length];
   const logoSizes = ['short', 'medium', 'large', 'hero'];
   const logoSize = logoSizes[(seed >> 3) % logoSizes.length];
-  const logoOnlyAllowed = Boolean(site.logoFile) && !['care', 'education', 'professional'].includes(nature);
-  const showName = !logoOnlyAllowed || seed % 4 !== 0;
+  const showName = !site.logoFile;
   const brandLayout = !showName ? 'logo-only' : seed % 5 === 0 ? 'stacked' : seed % 5 === 1 ? 'vertical' : 'inline';
   const cta = ctaFromGoal(site.blueprint?.primaryGoal || site.content?.hero?.primaryCta || '');
   const note = site.content?.hero?.kicker || site.blueprint?.businessType || site.brief.industry;
@@ -618,11 +617,11 @@ function applyProfessionalContent(site) {
     densityTargets: { primary: '0.7-1.1%', secondary: '0.2-0.5%' },
     naturalUsageNotes: 'Professional keywords are used around trust, risk, and decision-making rather than repeated mechanically.'
   };
-  const pressure = isLegal ? 'legal decisions' : isFinance ? 'financial pressure' : isAccounting ? 'tax, accounts, and cashflow decisions' : 'important business decisions';
+  const pressure = isLegal ? { subject: 'legal decisions', verb: 'need' } : isFinance ? { subject: 'financial pressure', verb: 'needs' } : isAccounting ? { subject: 'tax, accounts, and cashflow decisions', verb: 'need' } : { subject: 'important business decisions', verb: 'need' };
   site.content.hero = {
     ...site.content.hero,
     kicker: `${site.brief.location} ${industry.toLowerCase()}`,
-    headline: `${site.brief.businessName} gives clear advice when ${pressure} need a calm next step.`,
+    headline: `${site.brief.businessName} gives clear advice when ${pressure.subject} ${pressure.verb} a calm next step.`,
     subtext: `${site.brief.businessName} helps clients in ${site.brief.location} understand their options, reduce uncertainty, and act with confidence before decisions become harder to control.`,
     primaryCta: isLegal ? 'Book a legal enquiry' : isFinance ? 'Start a confidential enquiry' : 'Book a first conversation',
     secondaryCta: 'View specialist routes'
@@ -2120,6 +2119,11 @@ function professionalQualityCss() {
   return `
 h1,h2,h3{text-wrap:balance;overflow-wrap:break-word;hyphens:auto}
 h1{word-spacing:normal}
+.brand-logo-short{height:34px;max-width:150px}.brand-logo-medium{height:46px;max-width:190px}.brand-logo-large{height:58px;max-width:230px}.brand-logo-hero{height:64px;max-width:250px}.brand-logo{object-fit:contain}.brand-logo+span{display:none!important}.brand-logo-medium,.brand-logo-large,.brand-logo-hero{width:auto}
+.header-minimal,.header-classic,.header-stacked{border-radius:0!important;box-shadow:0 12px 38px color-mix(in srgb,var(--ink),transparent 92%);padding-block:.9rem}.header-minimal .brand,.header-classic .brand,.header-stacked .brand{min-width:0}.header-minimal nav,.header-classic nav,.header-stacked nav{gap:clamp(.8rem,1.6vw,1.4rem)}.header-minimal .header-cta,.header-classic .header-cta,.header-stacked .header-cta{white-space:nowrap}
+.proof-ledger h2,.authority-columns h2,.home-benefit-board h3,.service-rich-card h2{font-size:clamp(1.45rem,2.35vw,2.75rem)!important;line-height:1.08!important;word-spacing:normal;text-align:left}
+.proof-ledger article,.authority-columns article{padding:clamp(1.1rem,2.4vw,1.75rem)!important;min-height:0!important}
+.proof-ledger,.authority-columns{align-items:start}
 .professional-hero-visual h1,.software-hero h1{max-width:980px}
 .professional-visual img,.software-visual img{background:var(--secondary)}
 .professional-intelligence .section-heading h2{max-width:980px}
