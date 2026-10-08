@@ -15,7 +15,7 @@ export async function recordSiteFeedback(siteId, payload = {}, options = {}) {
 
   const signals = feedbackToSignals(feedback, site.industry);
   for (const signal of signals) upsertLearningRule(signal);
-  const saved = { id: result.lastInsertRowid, ...feedback, site };
+  const saved = { id: result.lastInsertRowid, ...feedback, site, signalsCreated: signals.length };
   saved.mysqlSaved = await recordFeedbackForTraining({ site, feedback: saved, learningRules: signals.map(publicSignal) });
   try {
     saved.logPath = await appendTeachLog({ feedbackId: saved.id, site, feedback, learningRules: signals, siteUrl: options.siteUrl });
@@ -83,17 +83,22 @@ function normalizeFeedback(payload) {
 }
 
 function feedbackToSignals(feedback, industry) {
+  // Every filled-in box becomes a lesson, whatever the rating. (Previously "worked well"
+  // only counted for 4-5 stars and "avoid" only for 1-3 stars, so mixed feedback was lost.)
   const signals = [];
   const scope = 'industry';
   const targetIndustry = normalizeIndustry(industry);
-  if (feedback.rating >= 4 && (feedback.positives || feedback.feedbackText)) {
-    signals.push(rule(scope, targetIndustry, 'positive', 'User liked this direction', `Keep doing this when relevant: ${feedback.positives || feedback.feedbackText}`));
+  if (feedback.positives) {
+    signals.push(rule(scope, targetIndustry, 'positive', 'User liked this direction', `Keep doing this when relevant: ${feedback.positives}`));
   }
-  if (feedback.rating <= 3 && (feedback.negatives || feedback.feedbackText)) {
-    signals.push(rule(scope, targetIndustry, 'negative', 'User disliked this issue', `Avoid or improve this: ${feedback.negatives || feedback.feedbackText}`));
+  if (feedback.negatives) {
+    signals.push(rule(scope, targetIndustry, 'negative', 'User disliked this issue', `Avoid or improve this: ${feedback.negatives}`));
   }
   if (feedback.suggestedChanges) {
     signals.push(rule(scope, targetIndustry, 'request', 'User requested improvement', `Add or improve: ${feedback.suggestedChanges}`));
+  }
+  if (feedback.feedbackText) {
+    signals.push(rule(scope, targetIndustry, feedback.rating >= 4 ? 'positive' : 'negative', feedback.rating >= 4 ? 'User liked this direction' : 'User disliked this issue', `${feedback.rating >= 4 ? 'Keep doing this when relevant' : 'Avoid or improve this'}: ${feedback.feedbackText}`));
   }
   if (feedback.rating <= 2 && feedback.category) {
     signals.push(rule('global', '', 'negative', `Low rating: ${feedback.category}`, `For future sites, pay extra attention to ${feedback.category}.`));

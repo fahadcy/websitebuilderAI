@@ -65,8 +65,13 @@ feedbackForm.addEventListener('submit', async (event) => {
     return;
   }
   const data = await response.json();
-  const mysqlNote = data.mysqlSaved ? ' MySQL mirror updated.' : ' Saved locally; MySQL mirror is not configured or unavailable.';
-  feedbackStatus.textContent = `Saved. ${data.learningRules} learning signal${data.learningRules === 1 ? '' : 's'} now influence future sites.${mysqlNote}`;
+  const created = data.signalsCreated || 0;
+  const learned = created
+    ? `${created} new lesson${created === 1 ? '' : 's'} learned. ${data.learningRules} lesson${data.learningRules === 1 ? '' : 's'} now shape future ${data.learning?.industry || ''} sites.`
+    : 'Rating saved, but no lesson was learned: fill in at least one of the text boxes to teach the builder.';
+  const logNote = data.logSaved ? ' Added to the Teach Builder log.' : '';
+  const mysqlNote = data.mysqlSaved ? ' MySQL mirror updated.' : '';
+  feedbackStatus.textContent = `Saved. ${learned}${logNote}${mysqlNote}`;
   feedbackForm.reset();
 });
 

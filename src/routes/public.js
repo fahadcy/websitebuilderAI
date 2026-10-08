@@ -322,7 +322,7 @@ publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, async (req, res) =
   const saved = await recordSiteFeedback(site.id, req.body || {}, { siteUrl: `${req.protocol}://${req.get('host')}/preview/${site.id}` });
   if (!saved) return res.status(404).json({ error: 'Site not found' });
   const learning = getLearningContext({ industry: site.industry, prompt: site.prompt });
-  res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), learningRules: learning.rules.length, learning });
+  res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), signalsCreated: saved.signalsCreated || 0, logSaved: Boolean(saved.logPath), learningRules: learning.rules.length, learning });
 });
 
 publicRouter.get('/api/domain/check', async (req, res) => {
