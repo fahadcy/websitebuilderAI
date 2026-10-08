@@ -979,7 +979,11 @@ Return JSON with exactly this shape:
   "tone": "calm | bold | warm | professional | creative",
   "goal": "book appointment | sell product | request quote | request demo | generate leads | make reservation | generate volunteer enquiries",
   "pages": ["Home", "...4-8 pages that fit this business; honour pages the user listed...", "Contact"],
-  "brand_colours": { "primary": "#hex or empty", "accent": "#hex or empty" },
+  "brand_colours": { "primary": "#hex", "accent": "#hex" },
+  "design": { "direction": "one of atelier | serene | kinetic | noir | aurora | craft | swiss | pop", "mode": "light | dark", "mood": "3-6 words describing the visual mood" },
+  "statement": "one bold, specific brand statement of 12-24 words for a large typographic section",
+  "marquee": ["4-8 short phrases (1-3 words) for a scrolling ticker, e.g. services or values"],
+  "one_page": false,
   "hero": { "eyebrow": "", "h1": "", "subheadline": "max 30 words", "primary_cta": "2-5 words", "secondary_cta": "2-4 words" },
   "trust_signals": [{ "value": "short e.g. 4.9★, 15 yrs, CQC, Same-day", "label": "short" }],
   "services": [{ "title": "", "description": "1-2 specific sentences", "price": "only if supplied" }],
@@ -1000,6 +1004,9 @@ Return JSON with exactly this shape:
   },
   "seo": { "primary_keyword": "e.g. dentist in Didsbury", "meta_description": "140-160 characters" }
 }
+Colours: if the user gave colours, use them exactly. Otherwise choose a distinctive palette that suits this specific business and audience (avoid default corporate blue unless it truly fits).
+Design directions: atelier = elegant editorial serif, light; serene = soft, rounded, calm, light; kinetic = huge bold type, energetic; noir = dark luxury serif; aurora = dark tech with gradients; craft = warm, handmade, organic; swiss = crisp corporate grid; pop = playful, bright, chunky. Pick the one that best fits the brief's tone.
+Set one_page true only if the user asked for a one-page/landing page, or listed no pages and the business is very small.
 Give 3 trust_signals, 3-8 services, 3 benefits, 3-4 process steps, 4-6 faqs, and 2-4 sections per page in page_copy. team, pricing and testimonials must be empty arrays unless the user supplied them.`;
 
   return jsonCompletion(system, user);

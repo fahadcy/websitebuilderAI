@@ -5,12 +5,13 @@ import slugify from 'slugify';
 
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
+// Image roles used by the studio layouts. Order matters: AI_IMAGE_COUNT keeps the first N.
 const DEFAULT_PURPOSES = [
   { id: 'hero', purpose: 'heroSeed', size: '1536x1024', aspect: 'landscape' },
-  { id: 'texture', purpose: 'textureSeed', size: '1024x1024', aspect: 'square' },
-  { id: 'service', purpose: 'serviceSeed', size: '1536x1024', aspect: 'landscape' },
   { id: 'about', purpose: 'about story', size: '1024x1536', aspect: 'portrait' },
-  { id: 'product', purpose: 'productSeed', size: '1024x1024', aspect: 'square' },
+  { id: 'band', purpose: 'bandSeed', size: '1536x1024', aspect: 'landscape' },
+  { id: 'service', purpose: 'serviceSeed', size: '1536x1024', aspect: 'landscape' },
+  { id: 'detail', purpose: 'detailSeed', size: '1024x1024', aspect: 'square' },
   { id: 'work', purpose: 'workSeed', size: '1536x1024', aspect: 'landscape' }
 ];
 
@@ -35,6 +36,7 @@ export function defaultImagePlan(site) {
     `${site.brief.businessName}, ${site.brief.industry}, ${site.brief.location}`,
     `Visual strategy: ${visual}`,
     `Use a restrained colour mood compatible with ${palette}.`,
+    site.design?.mode === 'dark' ? 'Low-key, moody lighting with deep shadows that sits well on a dark website.' : 'Bright, natural, airy light that sits well on a light website.',
     'Create realistic premium editorial website photography with believable lighting, natural composition, useful negative space, and a commercial art-direction standard.',
     'Avoid generic stock-photo smiles, random props, over-polished plastic skin, fake signage, visible text, typography, logos, watermarks, UI labels, surreal objects, and unrelated animals.'
   ].join(' ');
@@ -65,35 +67,37 @@ export async function generateSiteImages(site, outDir, progress = () => {}) {
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
   const quality = process.env.OPENAI_IMAGE_QUALITY || 'medium';
 
-  for (let index = 0; index < imagePlan.length; index += 1) {
+  // Generate a few images at a time: much faster than one-by-one, gentle on rate limits.
+  const concurrency = Math.max(1, Math.min(4, Number(process.env.AI_IMAGE_CONCURRENCY || 3)));
+  let done = 0;
+  const results = new Array(imagePlan.length);
+  async function produce(index) {
     const asset = imagePlan[index];
     try {
-      progress({ status: 'running', progress: 26 + Math.round((index / imagePlan.length) * 10), message: `Generating AI image: ${asset.id}` });
-      const response = await client.images.generate({
-        model,
-        prompt: asset.prompt,
-        size: asset.size,
-        quality,
-        n: 1
-      });
+      const response = await client.images.generate({ model, prompt: asset.prompt, size: asset.size, quality, n: 1 });
       const b64 = response.data?.[0]?.b64_json;
       if (!b64) throw new Error('Image API returned no image data');
       const fileName = `${String(index + 1).padStart(2, '0')}-${safeId(asset.id)}.png`;
       await fs.writeFile(path.join(imageDir, fileName), Buffer.from(b64, 'base64'));
-      const publicPath = `assets/images/${fileName}`;
-      assetMap[asset.purpose] = publicPath;
-      assetMap[asset.id] = publicPath;
-      applyCanonicalAssetKeys(assetMap, asset, publicPath);
-      generatedImages.push({ ...asset, file: publicPath });
+      results[index] = { ...asset, file: `assets/images/${fileName}` };
     } catch (error) {
       console.warn(`AI image generation skipped for ${asset.id}: ${error.message}`);
       const fallback = await writeFallbackImage(site, imageDir, asset, index, error.message);
-      assetMap[asset.purpose] = fallback.file;
-      assetMap[asset.id] = fallback.file;
-      applyCanonicalAssetKeys(assetMap, asset, fallback.file);
-      generatedImages.push({ ...asset, file: fallback.file, fallback: true, error: error.message });
+      results[index] = { ...asset, file: fallback.file, fallback: true, error: error.message };
     }
+    done += 1;
+    progress({ status: 'running', progress: 34 + Math.round((done / imagePlan.length) * 24), message: `Created image ${done} of ${imagePlan.length}` });
   }
+  const queue = imagePlan.map((_, index) => index);
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+    while (queue.length) await produce(queue.shift());
+  }));
+  results.forEach((item) => {
+    assetMap[item.purpose] = item.file;
+    assetMap[item.id] = item.file;
+    applyCanonicalAssetKeys(assetMap, item, item.file);
+    generatedImages.push(item);
+  });
   return { imagePlan, assetMap, generatedImages, skipped: false };
 }
 
@@ -113,7 +117,8 @@ function applyCanonicalAssetKeys(assetMap, asset, file) {
   const text = `${asset.id || ''} ${asset.purpose || ''}`.toLowerCase();
   const aliases = [
     [/hero|landing|above|home/, ['heroSeed']],
-    [/texture|detail|material|atmosphere/, ['textureSeed']],
+    [/band|parallax|panoram|wide|atmosph|ambience|ambiance/, ['bandSeed']],
+    [/texture|detail|material|close/, ['textureSeed', 'detailSeed']],
     [/service|subject|course|treatment|feature|offer/, ['serviceSeed']],
     [/about|story|founder|mission/, ['about story']],
     [/product|shop|catalog|arrival|lookbook|retail|shoe|sale|offer/, ['productSeed']],
@@ -133,29 +138,33 @@ async function writeFallbackImage(site, imageDir, asset, index, reason) {
 }
 
 function fallbackSvg(site, asset, index, reason) {
-  // Abstract, brand-coloured artwork used when AI images are unavailable. Deliberately
-  // not a fake UI/wireframe: soft organic shapes plus the business monogram.
+  // Abstract, brand-coloured artwork used when AI images are unavailable: a soft
+  // gradient field with varied geometric compositions per image role (no fake UI).
   const { width, height } = dimensionsFor(asset);
   const colors = site.tokens?.colors || {};
   const primary = colors.primary || 'oklch(45% 0.1 220)';
   const secondary = colors.secondary || 'oklch(97% 0.01 220)';
   const accent = colors.accent || 'oklch(70% 0.1 190)';
-  const name = String(site.brief?.businessName || site.brief?.business_name || '').replace(/^(the)\s+/i, '');
-  const monogram = name.split(/\s+/).filter((word) => /^[A-Za-z0-9]/.test(word)).slice(0, 2).map((word) => word[0].toUpperCase()).join('');
-  const seed = (index * 97 + name.length * 13) % 100 / 100;
+  const ink = colors.ink || 'oklch(20% 0.02 220)';
   const r = Math.min(width, height);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${xml(name)} illustration">
+  const seed = (index * 37 + String(site.brief?.businessName || '').length * 11) % 100 / 100;
+  const shapes = [
+    `<circle cx="${width * 0.3}" cy="${height * 0.4}" r="${r * 0.42}" fill="${xml(primary)}" opacity=".7" filter="url(#b)"/><circle cx="${width * 0.75}" cy="${height * 0.7}" r="${r * 0.36}" fill="${xml(accent)}" opacity=".8" filter="url(#b)"/><circle cx="${width * 0.62}" cy="${height * 0.35}" r="${r * 0.12}" fill="none" stroke="white" stroke-opacity=".7" stroke-width="2"/>`,
+    `<rect x="${width * 0.12}" y="${height * 0.15}" width="${width * 0.5}" height="${height * 0.7}" rx="${r * 0.04}" fill="${xml(primary)}" opacity=".75" transform="rotate(-6 ${width / 2} ${height / 2})"/><circle cx="${width * 0.68}" cy="${height * 0.55}" r="${r * 0.3}" fill="${xml(accent)}" opacity=".85"/>`,
+    `<path d="M0 ${height * 0.7} C ${width * 0.3} ${height * 0.45}, ${width * 0.6} ${height * 0.95}, ${width} ${height * 0.6} V ${height} H 0 Z" fill="${xml(primary)}" opacity=".8"/><path d="M0 ${height * 0.82} C ${width * 0.35} ${height * 0.65}, ${width * 0.7} ${height}, ${width} ${height * 0.78} V ${height} H 0 Z" fill="${xml(accent)}" opacity=".85"/><circle cx="${width * 0.72}" cy="${height * 0.28}" r="${r * 0.1}" fill="${xml(accent)}"/>`,
+    `${Array.from({ length: 7 }, (_, i) => `<circle cx="${width / 2}" cy="${height / 2}" r="${r * (0.08 + i * 0.07)}" fill="none" stroke="${xml(i % 2 ? accent : primary)}" stroke-opacity="${0.75 - i * 0.08}" stroke-width="${r * 0.012}"/>`).join('')}`,
+    `${Array.from({ length: 6 }, (_, i) => `<rect x="${width * (0.1 + i * 0.14)}" y="${height * (0.2 + ((i * 0.13 + seed) % 0.3))}" width="${width * 0.09}" height="${height * 0.55}" rx="${width * 0.045}" fill="${xml(i % 2 ? accent : primary)}" opacity=".8"/>`).join('')}`
+  ];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${xml(asset.purpose)} artwork">
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${xml(secondary)}"/><stop offset="1" stop-color="${xml(accent)}" stop-opacity=".55"/></linearGradient>
-    <filter id="blur"><feGaussianBlur stdDeviation="${Math.round(r * 0.06)}"/></filter>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${xml(secondary)}"/><stop offset="1" stop-color="${xml(accent)}" stop-opacity=".45"/></linearGradient>
+    <filter id="b"><feGaussianBlur stdDeviation="${Math.round(r * 0.05)}"/></filter>
+    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .08 0"/></filter>
   </defs>
-  <rect width="${width}" height="${height}" fill="url(#bg)"/>
-  <g filter="url(#blur)">
-    <circle cx="${width * (0.22 + seed * 0.2)}" cy="${height * 0.3}" r="${r * 0.32}" fill="${xml(primary)}" opacity=".55"/>
-    <circle cx="${width * 0.78}" cy="${height * (0.62 + seed * 0.1)}" r="${r * 0.38}" fill="${xml(accent)}" opacity=".7"/>
-    <circle cx="${width * 0.5}" cy="${height * 0.95}" r="${r * 0.28}" fill="white" opacity=".6"/>
-  </g>
-  ${monogram ? `<text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${Math.round(r * 0.26)}" fill="white" fill-opacity=".9" letter-spacing="${Math.round(r * 0.01)}">${xml(monogram)}</text>` : ''}
+  <rect width="${width}" height="${height}" fill="url(#g)"/>
+  ${shapes[index % shapes.length]}
+  <rect width="${width}" height="${height}" fill="${xml(ink)}" opacity=".04"/>
+  <rect width="${width}" height="${height}" filter="url(#n)"/>
   <metadata>${xml(reason || 'Designed fallback artwork generated locally when AI image generation was unavailable.')}</metadata>
 </svg>`;
 }
@@ -177,6 +186,7 @@ function directionForPurpose(purpose, nature) {
   const p = String(purpose).toLowerCase();
   const natureCue = visualCueForNature(nature);
   if (/hero/.test(p)) return `Hero image for a ${nature} website: ${natureCue} strong first impression, layered foreground/background, credible environment, confident editorial crop.`;
+  if (/band/.test(p)) return `Wide atmospheric scene for a full-width parallax banner: ${natureCue} cinematic wide composition, calm area in the centre for overlaid text, soft depth of field.`;
   if (/texture|detail/.test(p)) return `Close detail image: ${natureCue} material texture, atmosphere, hands or tools when relevant, brand colour harmony, no fake text.`;
   if (/service|treatment|feature/.test(p)) return `Service experience image: ${natureCue} show the offer, environment, tools, product, or outcome with documentary realism, not staged stock-photo cliches.`;
   if (/about|story/.test(p)) return `Business story image: ${natureCue} workplace atmosphere, craft, owner/team presence when appropriate, credibility without fake signage.`;

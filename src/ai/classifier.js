@@ -49,7 +49,7 @@ const NATURES = {
   },
   event: {
     industry: 'Events',
-    strong: ['wedding venue', 'event venue', 'conference', 'festival', 'event planner', 'wedding planner', 'events company'],
+    strong: ['wedding venue', 'event venue', 'party venue', 'soft play', 'play centre', 'play center', 'escape room', 'bowling', 'conference', 'festival', 'event planner', 'wedding planner', 'events company'],
     weak: ['event', 'events', 'tickets', 'venue', 'wedding', 'speakers', 'schedule']
   },
   education: {

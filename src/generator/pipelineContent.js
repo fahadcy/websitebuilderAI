@@ -199,6 +199,20 @@ export function extractProof(text) {
   return proof.slice(0, 3);
 }
 
+export function toneFromPrompt(text) {
+  const lower = String(text || '').toLowerCase();
+  const tones = [
+    ['luxury', /\b(luxur\w*|premium|high[- ]end|exclusive|upscale|opulent|bespoke)\b/g],
+    ['bold', /\b(bold|energetic|loud|edgy|street|punchy|high[- ]energy|powerful)\b/g],
+    ['calm', /\b(calm|reassur\w*|gentle|soft|relax\w*|soothing|tranquil)\b/g],
+    ['warm', /\b(warm|friendly|cosy|cozy|welcoming|homely|rustic)\b/g],
+    ['creative', /\b(creative|playful|fun|quirky|colou?rful|artistic|vibrant)\b/g],
+    ['professional', /\b(professional|corporate|trustworthy|formal|authoritative)\b/g]
+  ];
+  const scored = tones.map(([tone, pattern]) => [tone, (lower.match(pattern) || []).length]).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+  return scored[0]?.[0] || '';
+}
+
 export function wantsGallery(text) {
   return /gallery|before\s*\/?\s*(?:and\s*)?after|portfolio of work/i.test(String(text || ''));
 }
@@ -220,6 +234,8 @@ export function parsePromptFacts(prompt, metadata = {}) {
     pricing: extractPricing(text),
     proof: extractProof(text),
     gallery: wantsGallery(text),
+    onePage: /\b(one[- ]page|single[- ]page|landing page|onepager|one pager)\b/i.test(text),
+    tone: toneFromPrompt(text),
     keywords: [...text.matchAll(/["“]([^"”]{4,40})["”]/g)].map((match) => match[1]).filter((value) => value.split(' ').length <= 4 && !/book online/i.test(value)),
     lower: text.toLowerCase()
   };
@@ -331,7 +347,7 @@ const LIBRARY = {
     benefits: [['Expert coaches', 'Qualified trainers who know your name.'], ['Beginner friendly', 'Every session scales to your level.'], ['Flexible memberships', 'No long contracts.']],
     process: [['Book a free session', 'Try us with no obligation.'], ['Meet your coach', 'Set goals and a starting plan.'], ['Train & progress', 'Track results and keep improving.']],
     faqs: [['I am a complete beginner. Is that OK?', 'Yes. Coaches adapt every session to your level.'], ['Do I need to sign a contract?', 'No, memberships are rolling monthly.']],
-    trust: [['Qualified', 'coaches'], ['Free', 'first session'], ['No', 'long contracts']]
+    trust: [['Qualified', 'coaches'], ['Free', 'first session'], ['Flexible', 'memberships, no long contracts']]
   },
   portfolio: {
     pages: ['Home', 'Work', 'Services', 'About', 'Contact'],
@@ -487,7 +503,7 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
     primary: facts.colours.primary || hexOrEmpty(ai?.brand_colours?.primary) || (metadata.logoPalette?.primary && hexOrEmpty(metadata.logoPalette.primary)) || '',
     accent: facts.colours.accent || hexOrEmpty(ai?.brand_colours?.accent) || ''
   };
-  const tone = ['calm', 'bold', 'warm', 'professional', 'creative'].includes(str(ai?.tone)) ? str(ai.tone) : lib.tone;
+  const tone = facts.tone || (['calm', 'bold', 'warm', 'professional', 'creative', 'luxury'].includes(str(ai?.tone)) ? str(ai.tone) : lib.tone);
   const goal = str(ai?.goal, 60) || lib.goal;
   const primaryKeyword = str(ai?.seo?.primary_keyword, 60) || facts.keywords?.[0] || `${industry.toLowerCase()}${location ? ` in ${location.split(',')[0]}` : ''}`;
 
@@ -550,6 +566,17 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
     metaDescription: str(ai?.seo?.meta_description, 170),
     gallery: facts.gallery,
     seoKeywords: [...new Set([primaryKeyword, ...(facts.keywords || [])])].slice(0, 6),
+    statement: str(ai?.statement, 220) || lib.statement || '',
+    marquee: cleanList(ai?.marquee, (item) => str(item, 40), 3, 10).length ? cleanList(ai?.marquee, (item) => str(item, 40), 3, 10) : services.map((service) => service.title).slice(0, 8),
+    onePage: Boolean(facts.onePage || (!facts.pages.length && ai?.one_page === true)),
+    contactOnHome: facts.onePage,
+    aiDesign: {
+      direction: str(ai?.design?.direction, 20).toLowerCase(),
+      mood: str(ai?.design?.mood, 80),
+      mode: str(ai?.design?.mode, 10).toLowerCase(),
+      primary: hexOrEmpty(ai?.brand_colours?.primary),
+      accent: hexOrEmpty(ai?.brand_colours?.accent)
+    },
     pageCopy
   };
   return { brief, content };
