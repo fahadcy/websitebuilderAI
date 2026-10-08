@@ -28,7 +28,7 @@ export function normalizeImagePlan(plan, site) {
 }
 
 export function defaultImagePlan(site) {
-  const nature = site.blueprint?.projectNature || site.metadata?.blueprint?.projectNature || site.brief.industry || 'service';
+  const nature = `${site.blueprint?.projectNature || site.metadata?.blueprint?.projectNature || 'service'} ${site.brief.industry || ''}`.trim();
   const visual = site.blueprint?.visualStrategy || 'premium, realistic, commercially useful website photography';
   const palette = `${site.tokens.colors.primary}, ${site.tokens.colors.secondary}, ${site.tokens.colors.accent}`;
   const base = [
@@ -49,10 +49,14 @@ export async function generateSiteImages(site, outDir, progress = () => {}) {
   const enabled = site.metadata?.generateImages !== false && process.env.GENERATE_AI_IMAGES !== 'false';
   const assetMap = {};
   const generatedImages = [];
-  if (!imagePlan.length) return { imagePlan, assetMap, generatedImages, skipped: true };
-
   const imageDir = path.join(outDir, 'assets', 'images');
   await fs.mkdir(imageDir, { recursive: true });
+  if (!imagePlan.length) {
+    // AI images switched off (AI_IMAGE_COUNT=0): still ship designed artwork so pages never reference missing files.
+    const plan = defaultImagePlan(site);
+    await createFallbackImages(site, imageDir, plan, assetMap, generatedImages, 'AI image generation disabled.');
+    return { imagePlan: plan, assetMap, generatedImages, skipped: true };
+  }
   if (!enabled || !client) {
     const reason = enabled ? 'OPENAI_API_KEY is missing or image client is unavailable; using packaged designed fallback images.' : 'AI image generation disabled; using packaged designed fallback images.';
     return createFallbackImages(site, imageDir, imagePlan, assetMap, generatedImages, reason);
@@ -129,28 +133,30 @@ async function writeFallbackImage(site, imageDir, asset, index, reason) {
 }
 
 function fallbackSvg(site, asset, index, reason) {
+  // Abstract, brand-coloured artwork used when AI images are unavailable. Deliberately
+  // not a fake UI/wireframe: soft organic shapes plus the business monogram.
   const { width, height } = dimensionsFor(asset);
   const colors = site.tokens?.colors || {};
-  const primary = colors.primary || 'oklch(18% 0.02 250)';
-  const secondary = colors.secondary || 'oklch(97% 0.01 250)';
-  const accent = colors.accent || 'oklch(62% 0.09 225)';
-  const ink = colors.ink || 'oklch(18% 0.02 250)';
-  const offset = (index % 5) * 34;
-  const opacity = index % 2 ? '.16' : '.24';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${xml(asset.purpose)} visual asset">
+  const primary = colors.primary || 'oklch(45% 0.1 220)';
+  const secondary = colors.secondary || 'oklch(97% 0.01 220)';
+  const accent = colors.accent || 'oklch(70% 0.1 190)';
+  const name = String(site.brief?.businessName || site.brief?.business_name || '').replace(/^(the)\s+/i, '');
+  const monogram = name.split(/\s+/).filter((word) => /^[A-Za-z0-9]/.test(word)).slice(0, 2).map((word) => word[0].toUpperCase()).join('');
+  const seed = (index * 97 + name.length * 13) % 100 / 100;
+  const r = Math.min(width, height);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${xml(name)} illustration">
   <defs>
-    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${xml(secondary)}"/><stop offset="1" stop-color="${xml(primary)}"/></linearGradient>
-    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .08"/></feComponentTransfer></filter>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${xml(secondary)}"/><stop offset="1" stop-color="${xml(accent)}" stop-opacity=".55"/></linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="${Math.round(r * 0.06)}"/></filter>
   </defs>
-  <rect width="${width}" height="${height}" fill="url(#g)"/>
-  <rect width="${width}" height="${height}" filter="url(#grain)" opacity=".45"/>
-  <path d="M${width * .08} ${height * .18} H${width * .82} V${height * .26} H${width * .08} Z" fill="${xml(ink)}" opacity="${opacity}"/>
-  <path d="M${width * .12} ${height * .34} H${width * .58} V${height * .39} H${width * .12} Z" fill="${xml(accent)}" opacity=".42"/>
-  <path d="M${width * .12} ${height * .46} H${width * .72} V${height * .5} H${width * .12} Z" fill="white" opacity=".28"/>
-  <rect x="${width * .58 - offset}" y="${height * .55}" width="${width * .34}" height="${height * .28}" fill="white" opacity=".18"/>
-  <rect x="${width * .1 + offset / 3}" y="${height * .58}" width="${width * .34}" height="${height * .22}" fill="${xml(ink)}" opacity=".14"/>
-  <path d="M0 ${height * .88} C${width * .22} ${height * .7}, ${width * .5} ${height}, ${width} ${height * .72} V${height} H0 Z" fill="white" opacity=".18"/>
-  <metadata>${xml(reason || 'Designed fallback image generated locally when AI image generation was unavailable.')}</metadata>
+  <rect width="${width}" height="${height}" fill="url(#bg)"/>
+  <g filter="url(#blur)">
+    <circle cx="${width * (0.22 + seed * 0.2)}" cy="${height * 0.3}" r="${r * 0.32}" fill="${xml(primary)}" opacity=".55"/>
+    <circle cx="${width * 0.78}" cy="${height * (0.62 + seed * 0.1)}" r="${r * 0.38}" fill="${xml(accent)}" opacity=".7"/>
+    <circle cx="${width * 0.5}" cy="${height * 0.95}" r="${r * 0.28}" fill="white" opacity=".6"/>
+  </g>
+  ${monogram ? `<text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Georgia, 'Times New Roman', serif" font-size="${Math.round(r * 0.26)}" fill="white" fill-opacity=".9" letter-spacing="${Math.round(r * 0.01)}">${xml(monogram)}</text>` : ''}
+  <metadata>${xml(reason || 'Designed fallback artwork generated locally when AI image generation was unavailable.')}</metadata>
 </svg>`;
 }
 
@@ -181,14 +187,20 @@ function directionForPurpose(purpose, nature) {
 
 function visualCueForNature(nature) {
   const text = String(nature || '').toLowerCase();
-  if (/commerce|shoe|retail/.test(text)) return 'product-led retail styling, tactile materials, clean shelves or studio surfaces, sale-ready but premium;';
-  if (/hospitality|restaurant/.test(text)) return 'warm hospitality lighting, plated detail, room atmosphere, staff craft, reservation intent;';
-  if (/care|physio|dental|clinic/.test(text)) return 'calm clinical environment, clean equipment, reassuring human presence, careful hands, trust-led detail;';
-  if (/civic|fire|emergency|rescue|public safety/.test(text)) return 'public safety environment, fire station detail, emergency readiness, community prevention, clean official atmosphere;';
-  if (/education|tutor|course/.test(text)) return 'focused learning environment, desks, notebooks, calm mentor/student energy, modern study detail;';
-  if (/fitness|gym/.test(text)) return 'high-energy training environment, equipment detail, movement, grit, clean contrast;';
-  if (/software|saas/.test(text)) return 'modern team workflow, devices without readable screens, analytical atmosphere, crisp office light;';
-  if (/portfolio|creative/.test(text)) return 'studio process, materials, finished work, art-directed composition;';
+  if (/dental|dentist/.test(text)) return 'bright modern dental surgery, calm patient chair, clean equipment, friendly clinician and relaxed patient, soft daylight;';
+  if (/physio/.test(text)) return 'modern physiotherapy treatment room, hands-on assessment, exercise equipment, calm encouraging atmosphere;';
+  if (/bakery/.test(text)) return 'artisan bakery, fresh sourdough loaves and pastries, flour-dusted wooden surfaces, warm morning light;';
+  if (/^commerce|shoe|retail/.test(text)) return 'product-led retail styling, tactile materials, clean shelves or studio surfaces, sale-ready but premium;';
+  if (/^hospitality|restaurant|cafe/.test(text)) return 'warm hospitality lighting, plated detail, room atmosphere, staff craft, reservation intent;';
+  if (/^care|clinic|health/.test(text)) return 'calm clinical environment, clean equipment, reassuring human presence, careful hands, trust-led detail;';
+  if (/^trades|plumb|electric|builder|roof/.test(text)) return 'skilled tradesperson at work in a tidy home, quality tools, clean finished result, natural light;';
+  if (/^civic|fire station|fire and/.test(text)) return 'public safety environment, fire station detail, emergency readiness, community prevention, clean official atmosphere;';
+  if (/^education|tutor|course/.test(text)) return 'focused learning environment, desks, notebooks, calm mentor/student energy, modern study detail;';
+  if (/^fitness|gym/.test(text)) return 'high-energy training environment, equipment detail, movement, grit, clean contrast;';
+  if (/^software|saas/.test(text)) return 'modern team workflow, devices without readable screens, analytical atmosphere, crisp office light;';
+  if (/^portfolio|creative/.test(text)) return 'studio process, materials, finished work, art-directed composition;';
+  if (/^property|estate/.test(text)) return 'bright, well-styled home interiors and attractive street exteriors, welcoming natural light;';
+  if (/^professional|law|account/.test(text)) return 'calm modern office, considered meeting, documents and laptop without readable text, trustworthy atmosphere;';
   return 'credible local business environment, natural light, human-scale details, polished but not generic;';
 }
 

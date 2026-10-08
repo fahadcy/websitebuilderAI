@@ -1,3 +1,5 @@
+import { classifyBusiness } from './classifier.js';
+
 function inferTone(prompt) {
   const p = prompt.toLowerCase();
   if (p.includes('luxury')) return 'luxury';
@@ -19,16 +21,17 @@ function inferBusinessName(prompt) {
 
 function inferIndustry(prompt) {
   const p = prompt.toLowerCase();
-  if (p.includes('fire station') || p.includes('fire brigade') || p.includes('fire service') || p.includes('fire safety') || p.includes('emergency service')) return 'Fire and Community Safety';
-  if (p.includes('physio')) return 'Physiotherapy';
-  if (p.includes('dental')) return 'Dental Clinic';
-  if (p.includes('law')) return 'Law Firm';
-  if (p.includes('insolvency') || p.includes('restructuring') || p.includes('business advisory') || p.includes('financial distress') || p.includes('advisory')) return 'Business Advisory';
-  if (p.includes('restaurant')) return 'Restaurant';
-  if (p.includes('gym')) return 'Fitness Studio';
-  if (p.includes('saas') || p.includes('software') || p.includes('dashboard') || p.includes('platform') || p.includes(' app ') || p.includes(' ai ')) return 'Software Platform';
-  if (p.includes('shoe') || p.includes('footwear') || p.includes('trainer') || p.includes('sneaker')) return 'Shoe Retail';
-  return 'Professional Services';
+  const { nature, industry } = classifyBusiness(p);
+  if (nature === 'civic' && /fire|rescue/.test(p)) return 'Fire and Community Safety';
+  if (industry === 'Dental Practice') return 'Dental Clinic';
+  if (industry === 'Physiotherapy Clinic') return 'Physiotherapy';
+  if (industry === 'Law Firm') return 'Law Firm';
+  if (industry === 'Business Advisory') return 'Business Advisory';
+  if (nature === 'hospitality' && /restaurant|bistro|pizzeria|takeaway/.test(p)) return 'Restaurant';
+  if (nature === 'fitness') return 'Fitness Studio';
+  if (nature === 'software') return 'Software Platform';
+  if (nature === 'commerce' && /shoe|footwear|trainer|sneaker/.test(p)) return 'Shoe Retail';
+  return industry === 'Local Service' ? 'Professional Services' : industry;
 }
 
 export function fallbackBrief(prompt) {

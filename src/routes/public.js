@@ -137,7 +137,7 @@ publicRouter.get('/sites-report', (_req, res) => {
 });
 
 publicRouter.post('/generate', generationLimiter, handleLogoUpload, requireCsrf, (req, res) => {
-  const prompt = String(req.body.prompt || '').trim().slice(0, 1000);
+  const prompt = String(req.body.prompt || '').trim().slice(0, 4000);
   if (prompt.length < 10) return res.status(400).send('Prompt must be at least 10 characters.');
   const domainName = normalizeDomain(req.body.domainName || '');
   const logoPalette = parsePalette(req.body.logoPalette);
@@ -174,6 +174,12 @@ publicRouter.post('/generate', generationLimiter, handleLogoUpload, requireCsrf,
     metadata.clientAnswers?.length ? `Client answers:\n${metadata.clientAnswers.map((answer) => `${answer.label}: ${answer.value}`).join('\n')}` : '',
     logoPalette ? `Use this logo-derived palette: primary ${logoPalette.primary}, secondary ${logoPalette.secondary}, accent ${logoPalette.accent}.` : ''
   ].filter(Boolean).join('\n');
+  // The user's own words (without image plans / blueprint notes) drive industry detection.
+  metadata.userPrompt = [
+    prompt,
+    ...specifications,
+    metadata.clientAnswers?.length ? metadata.clientAnswers.map((answer) => `${answer.label}: ${answer.value}`).join('\n') : ''
+  ].filter(Boolean).join('\n');
   const job = jobQueue.create(enrichedPrompt, req.ip, metadata);
   res.redirect(`/generate?job=${job.id}`);
 });
@@ -196,7 +202,7 @@ function friendlyUploadError(title, message) {
 }
 
 publicRouter.post('/api/prompt/review', requireCsrf, async (req, res) => {
-  const prompt = String(req.body.prompt || '').trim().slice(0, 1600);
+  const prompt = String(req.body.prompt || '').trim().slice(0, 4000);
   if (prompt.length < 5) return res.status(400).json({ error: 'Enter a prompt first.' });
   const review = await reviewPrompt(prompt);
   res.json(review);

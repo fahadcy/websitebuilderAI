@@ -129,13 +129,13 @@
           <span>Transcript</span>
           <p x-text="voicePreview"></p>
         </div>
-        <textarea name="prompt" maxlength="1000" x-model="prompt" @input="handlePromptInput" required></textarea>
+        <textarea name="prompt" maxlength="4000" x-model="prompt" @input="handlePromptInput" required></textarea>
         <div class="extracted-brand" x-show="businessName">
           <span>Detected business</span>
           <strong x-text="businessName"></strong>
         </div>
         <div class="prompt-actions">
-          <span x-text="`${prompt.length}/1000`"></span>
+          <span x-text="`${prompt.length}/4000`"></span>
           <div class="prompt-action-buttons">
             <button type="button" class="review-button attention-button" @click="reviewCurrentPrompt" :disabled="reviewingPrompt" :class="{urgent:prompt && !promptReview && !reviewingPrompt}">
               <span x-show="!reviewingPrompt">Make Your Prompt Good</span>

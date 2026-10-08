@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { classifyNature } from '../ai/classifier.js';
 
 const REQUIRED_FILES = [
   'index.html',
@@ -606,13 +607,9 @@ function estimatePageWeight(files) {
 }
 
 function projectNatureFromSite(site) {
-  const value = `${site?.brief?.industry || site?.industry || ''} ${site?.prompt || site?.metadata?.prompt || ''}`.toLowerCase();
-  if (/software|saas|app|platform|dashboard|ai/.test(value)) return 'software';
-  if (/tutor|school|course|education|academy/.test(value)) return 'education';
-  if (/fire station|fire service|fire safety|emergency service|emergency response|rescue|public safety|community safety|civic/.test(value)) return 'civic';
-  if (/shoe|shop|store|ecommerce|sale|retail/.test(value)) return 'commerce';
-  if (/clinic|health|dental|physio|therapy|care/.test(value)) return 'care';
-  return 'service';
+  const declared = String(site?.blueprint?.projectNature || '').toLowerCase();
+  if (declared) return declared;
+  return classifyNature(`${site?.brief?.industry || site?.industry || ''} ${site?.prompt || site?.metadata?.prompt || ''}`);
 }
 
 function summaryFromVerdict(score, blockers, warnings) {

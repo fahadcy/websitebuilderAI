@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { analysisPrompt, contentPrompt, tokenPrompt, promptAnalysisSystem, contentGenerationSystem, designTokenSystem, eliteDesignerDirective, qualityWebsiteContract } from './prompts.js';
 import { fallbackBrief, fallbackContent, fallbackTokens } from './fallback.js';
+import { classifyNature } from './classifier.js';
 
 const client = process.env.OPENAI_API_KEY
   ? new OpenAI({
@@ -90,7 +91,7 @@ export async function generateTokens(brief) {
 }
 
 export async function reviewPrompt(rawPrompt) {
-  const prompt = String(rawPrompt || '').trim().slice(0, 1600);
+  const prompt = String(rawPrompt || '').trim().slice(0, 4000);
   const generated = await jsonCompletion(
     `${eliteDesignerDirective}
 ${qualityWebsiteContract}
@@ -624,18 +625,9 @@ function questionsForReviewNature(nature, pages) {
 }
 
 function inferReviewNature(lower, isShoe) {
-  if (isShoe || /shop|retail|e-?commerce|store|product|fashion/.test(lower)) return 'commerce';
-  if (/restaurant|cafe|bar|bakery|takeaway|menu|reservation/.test(lower)) return 'hospitality';
-  if (/clinic|dental|physio|health|therapy|medical|wellness|salon|spa/.test(lower)) return 'care';
-  if (/fire station|fire brigade|fire service|fire safety|emergency service|ambulance|rescue|public safety|community safety|council|charity|nonprofit|non-profit|volunteer service/.test(lower)) return 'civic';
-  if (/school|course|education|academy|tutor|tuition|student|gcse|a-level|maths|english|exam|revision|training/.test(lower)) return 'education';
-  if (/law|legal|solicitor|accountant|finance|consult/.test(lower)) return 'professional';
-  if (/gym|fitness|trainer|yoga|pilates/.test(lower)) return 'fitness';
-  if (/portfolio|photography|artist|designer|creative/.test(lower)) return 'portfolio';
-  if (/saas|software|app|platform|dashboard|ai|automation/.test(lower)) return 'software';
-  if (/estate|property|letting|homes|apartments/.test(lower)) return 'property';
-  if (/event|conference|festival|wedding|venue|ticket/.test(lower)) return 'event';
-  return 'service';
+  if (isShoe) return 'commerce';
+  const nature = classifyNature(lower);
+  return nature === 'trades' ? 'service' : nature;
 }
 
 function pagesForNature(nature, promptText = '') {
@@ -941,4 +933,70 @@ function extractName(prompt) {
 
 function domainSlugForReview(name) {
   return String(name || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9\s-]/g, '').split(/\s+/).filter(Boolean).filter((word) => !['the', 'and', 'ltd', 'limited', 'uk'].includes(word)).join('').slice(0, 48) || 'brand';
+}
+
+export function isAiTextEnabled() {
+  return Boolean(client);
+}
+
+const SITE_COPY_NATURES = ['care', 'hospitality', 'commerce', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'trades', 'civic', 'service'];
+
+/**
+ * One structured call that turns the user's prompt into a complete, business-specific
+ * brief + website copy for the pipeline generator. Returns null when OpenAI is not
+ * configured or the call fails, so callers can fall back to the rule-based engine.
+ */
+export async function generateSiteCopy(prompt, draft = {}) {
+  const system = `${eliteDesignerDirective}
+
+You are a senior UK conversion copywriter and information architect. You write specific, concrete website copy for one real business.
+Rules:
+- Use ONLY facts the user supplied for names, prices, phone numbers, addresses, opening hours, team members, accreditations, ratings and review counts. Never invent these. If a fact is missing, leave that field empty or the array empty.
+- Never write placeholder copy ("Lorem ipsum", "placeholder", "Starter/Growth/Complete" packages, "X made easier for Y").
+- Never invent testimonials or quotes from customers.
+- Write in British English. Be specific to the industry: a dentist talks about treatments, comfort and booking; a bakery about bakes, ordering and collection.
+- Headlines: short (max 9 words), benefit-led, no clichés like "Welcome to" or "Your trusted partner".
+- Return strict JSON only.`;
+
+  const user = `User's website request:
+"""
+${String(prompt || '').slice(0, 6000)}
+"""
+
+Rule-based first guess (correct it if wrong): ${JSON.stringify({ business_name: draft.business_name, industry: draft.industry, project_nature: draft.project_nature, location: draft.location, pages: draft.pages })}
+
+Return JSON with exactly this shape:
+{
+  "business_name": "",
+  "industry": "short label, e.g. Dental Practice, Artisan Bakery, Emergency Plumber",
+  "project_nature": "one of ${SITE_COPY_NATURES.join(' | ')}",
+  "location": "town/area or empty",
+  "target_audience": "one sentence",
+  "tone": "calm | bold | warm | professional | creative",
+  "goal": "book appointment | sell product | request quote | request demo | generate leads | make reservation | generate volunteer enquiries",
+  "pages": ["Home", "...4-8 pages that fit this business; honour pages the user listed...", "Contact"],
+  "brand_colours": { "primary": "#hex or empty", "accent": "#hex or empty" },
+  "hero": { "eyebrow": "", "h1": "", "subheadline": "max 30 words", "primary_cta": "2-5 words", "secondary_cta": "2-4 words" },
+  "trust_signals": [{ "value": "short e.g. 4.9★, 15 yrs, CQC, Same-day", "label": "short" }],
+  "services": [{ "title": "", "description": "1-2 specific sentences", "price": "only if supplied" }],
+  "benefits": [{ "title": "", "text": "" }],
+  "process": [{ "title": "", "text": "" }],
+  "about": { "heading": "", "body": "2-4 sentences" },
+  "team": [{ "name": "", "role": "", "bio": "" }],
+  "pricing": [{ "name": "", "price": "", "description": "" }],
+  "testimonials": [{ "quote": "", "name": "" }],
+  "faqs": [{ "q": "", "a": "" }],
+  "contact": { "phone": "", "email": "", "address": "", "hours": "" },
+  "final_cta": { "heading": "", "text": "" },
+  "page_copy": {
+    "<Page title from pages, except Home and Contact>": {
+      "h1": "", "intro": "2 sentences",
+      "sections": [{ "title": "", "text": "2-3 sentences", "bullets": ["optional"] }]
+    }
+  },
+  "seo": { "primary_keyword": "e.g. dentist in Didsbury", "meta_description": "140-160 characters" }
+}
+Give 3 trust_signals, 3-8 services, 3 benefits, 3-4 process steps, 4-6 faqs, and 2-4 sections per page in page_copy. team, pricing and testimonials must be empty arrays unless the user supplied them.`;
+
+  return jsonCompletion(system, user);
 }

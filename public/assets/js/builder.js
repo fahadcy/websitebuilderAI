@@ -140,7 +140,7 @@ function builderHome(){
         this.voicePreview='';
         return;
       }
-      this.prompt=mergeVoicePrompt(this.voiceBasePrompt||this.prompt, spoken).slice(0,1000);
+      this.prompt=mergeVoicePrompt(this.voiceBasePrompt||this.prompt, spoken).slice(0,4000);
       this.voicePreview='';
       this.voiceFinalTranscript='';
       this.updateBusinessFromPrompt(false);
