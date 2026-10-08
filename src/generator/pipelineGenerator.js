@@ -9,6 +9,7 @@ import { runRealityCheck, realityCheckMarkdown } from '../quality/realityCheck.j
 import { recordGenerationForTraining } from '../db/mysqlTrainingStore.js';
 import { generateSiteCopy, isAiTextEnabled } from '../ai/openaiClient.js';
 import { parsePromptFacts, buildBriefAndContent } from './pipelineContent.js';
+import { getLearningContext } from '../learning/feedbackMemory.js';
 
 const root = process.cwd();
 
@@ -115,9 +116,15 @@ export async function generatePipelineSite(prompt, progress = () => {}, metadata
   const facts = parsePromptFacts(metadata.userPrompt || prompt, metadata);
 
   progress({ status: 'running', progress: 15, message: isAiTextEnabled() ? 'Stage 2: writing site copy with AI' : 'Stage 2: building site copy' });
-  const ai = await generateSiteCopy(prompt, facts);
+  let learning = { promptGuidance: '', rules: [] };
+  try {
+    learning = getLearningContext({ industry: facts.industry, prompt: metadata.userPrompt || prompt });
+  } catch (error) {
+    console.warn(`Learning context unavailable: ${error.message}`);
+  }
+  const ai = await generateSiteCopy(prompt, facts, learning.promptGuidance);
   const { brief, content: draftContent } = buildBriefAndContent({ facts, ai, metadata });
-  console.log(`[pipeline] ${brief.business_name} | ${brief.industry} (${brief.project_nature}) | copy: ${ai ? 'AI' : 'rule-based fallback'}`);
+  console.log(`[pipeline] ${brief.business_name} | ${brief.industry} (${brief.project_nature}) | copy: ${ai ? 'AI' : 'rule-based fallback'} | learning rules applied: ${learning.rules?.length || 0}`);
 
   progress({ status: 'running', progress: 22, message: 'Stage 3: selecting design system' });
   const design = buildDesignEngine(brief);

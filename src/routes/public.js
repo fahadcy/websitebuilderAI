@@ -319,7 +319,7 @@ publicRouter.post('/api/sites/:siteId/reality-check', requireCsrf, async (req, r
 publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, async (req, res) => {
   const site = getGeneratedSite(req.params.siteId);
   if (!site) return res.status(404).json({ error: 'Site not found' });
-  const saved = await recordSiteFeedback(site.id, req.body || {});
+  const saved = await recordSiteFeedback(site.id, req.body || {}, { siteUrl: `${req.protocol}://${req.get('host')}/preview/${site.id}` });
   if (!saved) return res.status(404).json({ error: 'Site not found' });
   const learning = getLearningContext({ industry: site.industry, prompt: site.prompt });
   res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), learningRules: learning.rules.length, learning });

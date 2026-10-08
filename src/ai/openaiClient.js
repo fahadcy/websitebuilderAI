@@ -946,7 +946,7 @@ const SITE_COPY_NATURES = ['care', 'hospitality', 'commerce', 'professional', 'f
  * brief + website copy for the pipeline generator. Returns null when OpenAI is not
  * configured or the call fails, so callers can fall back to the rule-based engine.
  */
-export async function generateSiteCopy(prompt, draft = {}) {
+export async function generateSiteCopy(prompt, draft = {}, learningGuidance = '') {
   const system = `${eliteDesignerDirective}
 
 You are a senior UK conversion copywriter and information architect. You write specific, concrete website copy for one real business.
@@ -956,7 +956,11 @@ Rules:
 - Never invent testimonials or quotes from customers.
 - Write in British English. Be specific to the industry: a dentist talks about treatments, comfort and booking; a bakery about bakes, ordering and collection.
 - Headlines: short (max 9 words), benefit-led, no clichés like "Welcome to" or "Your trusted partner".
-- Return strict JSON only.`;
+- Return strict JSON only.
+- The user's request always wins over lessons from past feedback.${learningGuidance ? `
+
+Lessons from reviewers' Teach Builder feedback on earlier sites (apply where relevant):
+${String(learningGuidance).slice(0, 2500)}` : ''}`;
 
   const user = `User's website request:
 """

@@ -1,10 +1,11 @@
 import { db } from '../db/database.js';
 import { recordFeedbackForTraining } from '../db/mysqlTrainingStore.js';
+import { appendTeachLog } from './teachLog.js';
 
 const MAX_NOTE = 1200;
 
-export async function recordSiteFeedback(siteId, payload = {}) {
-  const site = db.prepare('SELECT id, industry, business_name, prompt, status, output_path, zip_path, reality_check_score, reality_check_report, reality_check_verdict FROM generated_sites WHERE id = ?').get(siteId);
+export async function recordSiteFeedback(siteId, payload = {}, options = {}) {
+  const site = db.prepare('SELECT id, industry, business_name, prompt, status, output_path, zip_path, domain_name, created_at, reality_check_score, reality_check_report, reality_check_verdict FROM generated_sites WHERE id = ?').get(siteId);
   if (!site) return null;
   const feedback = normalizeFeedback(payload);
   const result = db.prepare(`INSERT INTO site_feedback
@@ -16,6 +17,11 @@ export async function recordSiteFeedback(siteId, payload = {}) {
   for (const signal of signals) upsertLearningRule(signal);
   const saved = { id: result.lastInsertRowid, ...feedback, site };
   saved.mysqlSaved = await recordFeedbackForTraining({ site, feedback: saved, learningRules: signals.map(publicSignal) });
+  try {
+    saved.logPath = await appendTeachLog({ feedbackId: saved.id, site, feedback, learningRules: signals, siteUrl: options.siteUrl });
+  } catch (error) {
+    console.warn(`Teach Builder text log not written: ${error.message}`);
+  }
   return saved;
 }
 
