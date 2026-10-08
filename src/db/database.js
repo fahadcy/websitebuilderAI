@@ -39,6 +39,7 @@ export async function migrate() {
   if (mysqlTrainingConfigured()) {
     try {
       await migrateMysqlTrainingStore();
+      console.log('MySQL mirror ready: generated sites and Teach Builder feedback will be saved (times in GMT).');
     } catch (error) {
       console.warn(`MySQL training store migration skipped: ${error.message}`);
     }

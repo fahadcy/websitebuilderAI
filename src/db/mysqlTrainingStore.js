@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import mysql from 'mysql2/promise';
 
@@ -21,6 +22,7 @@ export function mysqlTrainingStatus() {
 export async function migrateMysqlTrainingStore() {
   const db = await getPool();
   if (!db || migrated) return false;
+  await ensureDatabaseExists(db);
   await db.query(`
     CREATE TABLE IF NOT EXISTS builder_generation_runs (
       site_id VARCHAR(160) PRIMARY KEY,
@@ -43,8 +45,8 @@ export async function migrateMysqlTrainingStore() {
       reality_check_score INT,
       reality_check_verdict VARCHAR(120),
       reality_check_json LONGTEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   await db.query(`
@@ -59,8 +61,8 @@ export async function migrateMysqlTrainingStore() {
       section_count INT NOT NULL DEFAULT 0,
       form_count INT NOT NULL DEFAULT 0,
       image_count INT NOT NULL DEFAULT 0,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_generation_page (site_id, file_path),
       KEY idx_generation_pages_site (site_id),
       CONSTRAINT fk_generation_pages_site FOREIGN KEY (site_id) REFERENCES builder_generation_runs(site_id) ON DELETE CASCADE
@@ -74,8 +76,8 @@ export async function migrateMysqlTrainingStore() {
       asset_type VARCHAR(80) NOT NULL,
       content LONGTEXT,
       metadata_json LONGTEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_generation_asset (site_id, file_path),
       KEY idx_generation_assets_site (site_id),
       CONSTRAINT fk_generation_assets_site FOREIGN KEY (site_id) REFERENCES builder_generation_runs(site_id) ON DELETE CASCADE
@@ -91,7 +93,7 @@ export async function migrateMysqlTrainingStore() {
       blockers INT NOT NULL DEFAULT 0,
       warnings INT NOT NULL DEFAULT 0,
       report_json LONGTEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_quality_site (site_id),
       CONSTRAINT fk_quality_site FOREIGN KEY (site_id) REFERENCES builder_generation_runs(site_id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -108,7 +110,7 @@ export async function migrateMysqlTrainingStore() {
       negatives MEDIUMTEXT,
       suggested_changes MEDIUMTEXT,
       reward_delta DECIMAL(6,4) NOT NULL DEFAULT 0,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_feedback_site (site_id),
       KEY idx_feedback_rating (rating),
       UNIQUE KEY uniq_feedback_sqlite (site_id, sqlite_feedback_id),
@@ -126,8 +128,8 @@ export async function migrateMysqlTrainingStore() {
       weight INT NOT NULL DEFAULT 1,
       source_count INT NOT NULL DEFAULT 1,
       source_site_id VARCHAR(160),
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uniq_learning_rule (scope, industry, signal_type, title, instruction(255))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
@@ -143,8 +145,8 @@ export async function migrateMysqlTrainingStore() {
       reward_reason TEXT,
       status VARCHAR(80) NOT NULL DEFAULT 'candidate',
       split_name VARCHAR(40) NOT NULL DEFAULT 'train',
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       KEY idx_training_site (site_id),
       KEY idx_training_reward (reward_score),
       KEY idx_training_status (status),
@@ -161,7 +163,7 @@ export async function migrateMysqlTrainingStore() {
       action_json LONGTEXT,
       outcome_json LONGTEXT,
       notes MEDIUMTEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_rl_site (site_id),
       KEY idx_rl_type (event_type),
       CONSTRAINT fk_rl_site FOREIGN KEY (site_id) REFERENCES builder_generation_runs(site_id) ON DELETE CASCADE
@@ -382,6 +384,24 @@ export async function exportTrainingData({ outputDir = path.join(process.cwd(), 
   };
 }
 
+// Create the configured database on first run (e.g. "website_builder" on Aiven).
+async function ensureDatabaseExists(db) {
+  try {
+    await db.query('SELECT 1');
+  } catch (error) {
+    if (error.code !== 'ER_BAD_DB_ERROR') throw error;
+    const config = mysqlConfig();
+    const name = config.database || (config.uri ? new URL(config.uri).pathname.replace(/^\//, '') : '');
+    if (!/^[A-Za-z0-9_]+$/.test(name)) throw error;
+    const { database, uri, waitForConnections, connectionLimit, ...rest } = config;
+    const admin = await mysql.createConnection(uri ? { uri: uri.replace(/\/[^/?]*(\?|$)/, '/$1'), ssl: config.ssl, timezone: 'Z' } : rest);
+    await admin.query(`CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    await admin.end();
+    console.log(`MySQL: created database ${name}`);
+    await db.query('SELECT 1');
+  }
+}
+
 async function safeMysql(label, action) {
   const db = await getPool();
   if (!db) return false;
@@ -403,6 +423,7 @@ async function ensureMysqlUniqueKey(db, table, keyName, columnsSql) {
 }
 
 async function createReportingViews(db) {
+  // All times are GMT (sessions run with time_zone '+00:00').
   await db.query(`
     CREATE OR REPLACE VIEW builder_generated_sites AS
     SELECT
@@ -412,31 +433,41 @@ async function createReportingViews(db) {
       prompt_text,
       status,
       domain_name,
+      CASE WHEN JSON_VALID(template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(template_profile_json, '$.direction')) END AS design_direction,
+      CASE WHEN JSON_VALID(template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(template_profile_json, '$.mode')) END AS site_format,
+      CASE WHEN JSON_VALID(blueprint_json) THEN JSON_UNQUOTE(JSON_EXTRACT(blueprint_json, '$.visualStrategy')) END AS visual_strategy,
+      CASE WHEN JSON_VALID(blueprint_json) THEN JSON_UNQUOTE(JSON_EXTRACT(blueprint_json, '$.projectNature')) END AS project_nature,
       output_path,
       zip_path,
       logo_path,
       reality_check_score,
       reality_check_verdict,
-      created_at,
-      updated_at
+      created_at AS created_at_gmt,
+      updated_at AS updated_at_gmt
     FROM builder_generation_runs
   `);
   await db.query(`
     CREATE OR REPLACE VIEW builder_teach_builder_feedback AS
     SELECT
       f.id,
+      f.created_at AS submitted_at_gmt,
       f.site_id,
       g.business_name,
       g.industry,
+      g.domain_name,
+      CASE WHEN JSON_VALID(g.template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(g.template_profile_json, '$.direction')) END AS design_direction,
+      g.reality_check_score,
+      g.reality_check_verdict,
+      g.prompt_text,
       f.sqlite_feedback_id,
       f.rating,
       f.category,
-      f.feedback_text,
-      f.positives,
-      f.negatives,
-      f.suggested_changes,
+      f.positives AS what_worked_well,
+      f.negatives AS avoid_or_improve,
+      f.suggested_changes AS specific_change,
+      f.feedback_text AS other_notes,
       f.reward_delta,
-      f.created_at
+      g.created_at AS site_generated_at_gmt
     FROM builder_feedback_signals f
     LEFT JOIN builder_generation_runs g ON g.site_id = f.site_id
   `);
@@ -448,6 +479,10 @@ async function getPool() {
   if (!config) return null;
   try {
     pool = mysql.createPool(config);
+    // Store and read every timestamp in GMT/UTC regardless of server or host settings.
+    pool.on('connection', (connection) => {
+      connection.query("SET time_zone = '+00:00'");
+    });
     return pool;
   } catch (error) {
     lastError = error;
@@ -456,14 +491,38 @@ async function getPool() {
   }
 }
 
+// TLS for hosted MySQL (Aiven, PlanetScale, etc.). Enabled with BUILDER_MYSQL_SSL=true,
+// or automatically for *.aivencloud.com. Provide the provider CA certificate in
+// BUILDER_MYSQL_SSL_CA (PEM text, or a path to the .pem file) to verify the server.
+function sslConfig(host = '') {
+  const flag = String(process.env.BUILDER_MYSQL_SSL || '').toLowerCase();
+  const wanted = flag === 'true' || flag === '1' || flag === 'required' || (!flag && /aivencloud\.com$/i.test(host));
+  if (!wanted || flag === 'false') return undefined;
+  const caSetting = process.env.BUILDER_MYSQL_SSL_CA || '';
+  let ca = '';
+  if (caSetting.includes('BEGIN CERTIFICATE')) ca = caSetting.replace(/\\n/g, '\n');
+  else if (caSetting) {
+    try {
+      ca = fsSync.readFileSync(caSetting, 'utf8');
+    } catch (error) {
+      console.warn(`MySQL CA file not readable (${caSetting}): ${error.message}`);
+    }
+  }
+  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
+}
+
 function mysqlConfig() {
   const url = process.env.BUILDER_MYSQL_URL || process.env.TRAINING_MYSQL_URL || process.env.MYSQL_URL;
   if (url) {
+    let urlHost = '';
+    try { urlHost = new URL(url).hostname; } catch { urlHost = ''; }
     return {
       uri: url,
       waitForConnections: true,
       connectionLimit: Number(process.env.BUILDER_MYSQL_CONNECTION_LIMIT || 5),
-      namedPlaceholders: false
+      namedPlaceholders: false,
+      timezone: 'Z',
+      ssl: sslConfig(urlHost)
     };
   }
   const database = process.env.BUILDER_MYSQL_DATABASE || process.env.TRAINING_MYSQL_DATABASE || process.env.MYSQL_DATABASE;
@@ -477,7 +536,10 @@ function mysqlConfig() {
     database,
     waitForConnections: true,
     connectionLimit: Number(process.env.BUILDER_MYSQL_CONNECTION_LIMIT || 5),
-    charset: 'utf8mb4'
+    charset: 'utf8mb4',
+    timezone: 'Z',
+    connectTimeout: 15000,
+    ssl: sslConfig(host)
   };
 }
 
