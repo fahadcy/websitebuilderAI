@@ -12,6 +12,7 @@ import { searchCompaniesHouse } from '../integrations/companiesHouse.js';
 import { createZip } from '../packager/zipper.js';
 import { runRealityCheck, realityCheckMarkdown } from '../quality/realityCheck.js';
 import { recordSiteFeedback, getLearningContext } from '../learning/feedbackMemory.js';
+import { recordManualEditForTraining, recordRealityCheckForTraining } from '../db/mysqlTrainingStore.js';
 
 export const publicRouter = express.Router();
 const root = process.cwd();
@@ -265,6 +266,7 @@ publicRouter.post('/api/editor/:siteId/page', requireCsrf, async (req, res) => {
   if (!isWithin(site.output_path, htmlPath) || !fs.existsSync(htmlPath)) return res.status(404).json({ error: 'Page not found' });
   fs.writeFileSync(htmlPath, html, 'utf8');
   const audit = await auditAndPersist(site);
+  await recordManualEditForTraining({ site, file, html, audit });
   const zipPath = await createZip(site.output_path, site.id);
   db.prepare('UPDATE generated_sites SET zip_path = ? WHERE id = ?').run(zipPath, site.id);
   res.json({ ok: true, file, zipPath, realityCheck: publicAuditSummary(audit) });
@@ -308,13 +310,13 @@ publicRouter.post('/api/sites/:siteId/reality-check', requireCsrf, async (req, r
   res.json(publicAuditSummary(audit));
 });
 
-publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, (req, res) => {
+publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, async (req, res) => {
   const site = getGeneratedSite(req.params.siteId);
   if (!site) return res.status(404).json({ error: 'Site not found' });
-  const saved = recordSiteFeedback(site.id, req.body || {});
+  const saved = await recordSiteFeedback(site.id, req.body || {});
   if (!saved) return res.status(404).json({ error: 'Site not found' });
   const learning = getLearningContext({ industry: site.industry, prompt: site.prompt });
-  res.json({ ok: true, feedbackId: saved.id, learningRules: learning.rules.length, learning });
+  res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), learningRules: learning.rules.length, learning });
 });
 
 publicRouter.get('/api/domain/check', async (req, res) => {
@@ -411,6 +413,7 @@ async function auditAndPersist(site) {
   fs.writeFileSync(path.join(site.output_path, 'reality-check-report.md'), realityCheckMarkdown(siteRecordToAuditSite(site), audit), 'utf8');
   db.prepare('UPDATE generated_sites SET reality_check_score = ?, reality_check_report = ?, reality_check_verdict = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
     .run(audit.score, JSON.stringify(audit), audit.verdict, site.id);
+  await recordRealityCheckForTraining({ site, audit });
   return audit;
 }
 

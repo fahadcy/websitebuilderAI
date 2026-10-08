@@ -1,9 +1,10 @@
 import { db } from '../db/database.js';
+import { recordFeedbackForTraining } from '../db/mysqlTrainingStore.js';
 
 const MAX_NOTE = 1200;
 
-export function recordSiteFeedback(siteId, payload = {}) {
-  const site = db.prepare('SELECT id, industry, business_name FROM generated_sites WHERE id = ?').get(siteId);
+export async function recordSiteFeedback(siteId, payload = {}) {
+  const site = db.prepare('SELECT id, industry, business_name, prompt, status, output_path, zip_path, reality_check_score, reality_check_report, reality_check_verdict FROM generated_sites WHERE id = ?').get(siteId);
   if (!site) return null;
   const feedback = normalizeFeedback(payload);
   const result = db.prepare(`INSERT INTO site_feedback
@@ -13,7 +14,9 @@ export function recordSiteFeedback(siteId, payload = {}) {
 
   const signals = feedbackToSignals(feedback, site.industry);
   for (const signal of signals) upsertLearningRule(signal);
-  return { id: result.lastInsertRowid, ...feedback, site };
+  const saved = { id: result.lastInsertRowid, ...feedback, site };
+  saved.mysqlSaved = await recordFeedbackForTraining({ site, feedback: saved, learningRules: signals.map(publicSignal) });
+  return saved;
 }
 
 export function getLearningContext({ industry = '', prompt = '' } = {}) {
@@ -129,6 +132,18 @@ function publicRule(row) {
     weight: row.weight,
     sourceCount: row.source_count,
     updatedAt: row.updated_at
+  };
+}
+
+function publicSignal(signal) {
+  return {
+    scope: signal.scope,
+    industry: signal.industry,
+    signalType: signal.signalType,
+    title: signal.title,
+    instruction: signal.instruction,
+    weight: 1,
+    sourceCount: 1
   };
 }
 

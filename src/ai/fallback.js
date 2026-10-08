@@ -19,6 +19,7 @@ function inferBusinessName(prompt) {
 
 function inferIndustry(prompt) {
   const p = prompt.toLowerCase();
+  if (p.includes('fire station') || p.includes('fire brigade') || p.includes('fire service') || p.includes('fire safety') || p.includes('emergency service')) return 'Fire and Community Safety';
   if (p.includes('physio')) return 'Physiotherapy';
   if (p.includes('dental')) return 'Dental Clinic';
   if (p.includes('law')) return 'Law Firm';
@@ -41,7 +42,9 @@ export function fallbackBrief(prompt) {
   const isAdvisory = industry === 'Business Advisory';
   const isDental = industry === 'Dental Clinic';
   const isGym = industry === 'Fitness Studio';
+  const isCivic = industry === 'Fire and Community Safety';
   const heroHeadline = isShoe ? 'Clean shoe deals made easy to browse'
+    : isCivic ? 'Emergency help, fire safety, and community support made clear'
     : isRestaurant ? 'A table worth planning your evening around'
     : isSoftware ? 'A clearer operating system for busy teams'
     : isAdvisory ? 'Calm advice when financial pressure is real'
@@ -50,6 +53,7 @@ export function fallbackBrief(prompt) {
     : isPhysio ? 'A calmer route back to confident movement'
     : 'A clearer way to choose the right service';
   const heroSubtext = isShoe ? `${businessName} is a clean, easy-to-shop footwear sale website built to help customers find stylish shoes at better prices.`
+    : isCivic ? `${businessName} helps local residents understand emergency routes, fire prevention support, community programmes, and how to contact the right team quickly.`
     : isRestaurant ? `${businessName} helps diners discover the menu, feel the atmosphere, and reserve with confidence.`
     : isSoftware ? `${businessName} helps teams understand the product, see practical workflows, and request a useful demo.`
     : isAdvisory ? `${businessName} gives directors clear, confidential guidance through insolvency, restructuring, and financial distress decisions.`
@@ -64,7 +68,8 @@ export function fallbackBrief(prompt) {
     colourScheme: { primary: '#0f5f86', secondary: '#e9f5f9', accent: '#55a7b3' },
     tone,
     pages: ['home', 'about', 'services', 'team', 'blog', 'contact', 'privacy'],
-    services: isShoe ? ['Leather trainers', 'Everyday flats', 'Smart loafers', 'Running shoes', 'Ankle boots', 'Occasion heels']
+    services: isCivic ? ['Emergency response guidance', 'Home fire safety visits', 'Business fire safety checks', 'School and community visits', 'Volunteer support']
+      : isShoe ? ['Leather trainers', 'Everyday flats', 'Smart loafers', 'Running shoes', 'Ankle boots', 'Occasion heels']
       : isRestaurant ? ['Charcoal small plates', 'Seasonal mains', 'Weekend brunch', 'Private dining', 'Signature desserts']
       : isSoftware ? ['Workflow dashboard', 'AI task routing', 'Team analytics', 'Automated reporting', 'Integrations']
       : isAdvisory ? ['Insolvency advice', 'Business restructuring', 'Director consultation', 'Creditor negotiation', 'Recovery planning']
@@ -77,10 +82,10 @@ export function fallbackBrief(prompt) {
       { name: 'Samir Patel', role: 'Senior Therapist', bio: 'Specialises in movement assessment and progressive rehabilitation.' },
       { name: 'Lucy Bennett', role: 'Patient Care Lead', bio: 'Keeps every visit organised, welcoming, and focused on outcomes.' }
     ],
-    tagline: isRestaurant ? 'Good food. Easy booking.' : isSoftware ? 'Clear workflows. Better decisions.' : isAdvisory ? 'Confidential advice. Clear options.' : isGym ? 'Train well. Keep going.' : isShoe ? 'Clean deals. Better browsing.' : 'Clear service. Confident next steps.',
+    tagline: isCivic ? 'Safety first. Clear routes. Local support.' : isRestaurant ? 'Good food. Easy booking.' : isSoftware ? 'Clear workflows. Better decisions.' : isAdvisory ? 'Confidential advice. Clear options.' : isGym ? 'Train well. Keep going.' : isShoe ? 'Clean deals. Better browsing.' : 'Clear service. Confident next steps.',
     heroHeadline,
     heroSubtext,
-    aboutText: isShoe ? `${businessName} curates sale footwear with clear categories, simple guidance, and a shopping experience designed to attract more customers.` : isRestaurant ? `${businessName} brings menu, atmosphere, bookings, and local details together in a way that helps diners choose quickly.` : isSoftware ? `${businessName} presents product value, use cases, and demo conversion clearly for teams comparing software.` : isAdvisory ? `${businessName} supports directors and business owners with calm insolvency, restructuring, and advisory guidance when decisions need to be made carefully.` : `${businessName} is built around clear information, relevant proof, and a practical route from first visit to enquiry.`,
+    aboutText: isCivic ? `${businessName} brings emergency guidance, prevention advice, local safety services, and community contact routes together in one clear public-service website.` : isShoe ? `${businessName} curates sale footwear with clear categories, simple guidance, and a shopping experience designed to attract more customers.` : isRestaurant ? `${businessName} brings menu, atmosphere, bookings, and local details together in a way that helps diners choose quickly.` : isSoftware ? `${businessName} presents product value, use cases, and demo conversion clearly for teams comparing software.` : isAdvisory ? `${businessName} supports directors and business owners with calm insolvency, restructuring, and advisory guidance when decisions need to be made carefully.` : `${businessName} is built around clear information, relevant proof, and a practical route from first visit to enquiry.`,
     seoKeywords: fallbackSeoKeywords({ businessName, industry, location: prompt.match(/\bin\s+([A-Za-z ]+)/i)?.[1]?.replace(/\s+(called|with)\b.*$/i, '').trim() || 'Manchester' }),
     googleMapsLat: '53.4808',
     googleMapsLng: '-2.2426',
@@ -98,16 +103,17 @@ export function fallbackContent(brief) {
   const isAdvisory = brief.industry === 'Business Advisory';
   const isDental = brief.industry === 'Dental Clinic';
   const isGym = brief.industry === 'Fitness Studio';
-  const serviceOutcome = isShoe ? 'A clearer route from browsing to finding the right pair at the right price.' : isRestaurant ? 'A clearer route from menu interest to booking or visiting.' : isSoftware ? 'A clearer route from product interest to demo request.' : isAdvisory ? 'A clearer route from financial pressure to a confidential, informed next step.' : isPhysio ? 'A clearer route from pain or uncertainty back to confident movement.' : 'A clearer route from enquiry to a confident decision.';
+  const isCivic = brief.industry === 'Fire and Community Safety';
+  const serviceOutcome = isCivic ? 'A clearer route from urgent need to the right public-safety action.' : isShoe ? 'A clearer route from browsing to finding the right pair at the right price.' : isRestaurant ? 'A clearer route from menu interest to booking or visiting.' : isSoftware ? 'A clearer route from product interest to demo request.' : isAdvisory ? 'A clearer route from financial pressure to a confidential, informed next step.' : isPhysio ? 'A clearer route from pain or uncertainty back to confident movement.' : 'A clearer route from enquiry to a confident decision.';
   return {
     hero: {
       headline: brief.heroHeadline,
       subtext: brief.heroSubtext,
       kicker: `${brief.location} ${brief.industry}`,
-      primaryCta: isShoe ? 'Shop the sale' : isRestaurant ? 'Reserve a table' : 'Book a first conversation',
-      secondaryCta: isShoe ? 'View size guide' : isRestaurant ? 'View menu highlights' : 'See how we work'
+      primaryCta: isCivic ? 'Find the right contact' : isShoe ? 'Shop the sale' : isRestaurant ? 'Reserve a table' : 'Book a first conversation',
+      secondaryCta: isCivic ? 'Read safety advice' : isShoe ? 'View size guide' : isRestaurant ? 'View menu highlights' : 'See how we work'
     },
-    brandThesis: isShoe ? `${brief.businessName} is built for shoppers who want sale prices without a messy bargain-bin experience. The site makes stock feel curated, easy to compare, and simple to enquire about.` : isRestaurant ? `${brief.businessName} is built around appetite, atmosphere, and practical booking details. The website makes the menu easy to scan and the decision to visit feel natural.` : isSoftware ? `${brief.businessName} is built for teams who need to understand value quickly. The website shows the product promise, practical workflows, and the next step toward a demo.` : isAdvisory ? `${brief.businessName} is built for directors who need straight answers, confidentiality, and credible options before insolvency or restructuring decisions become harder to control.` : `${brief.businessName} is built for visitors who need clear information, relevant proof, and a confident route to enquiry.`,
+    brandThesis: isCivic ? `${brief.businessName} is built for residents who need safety information quickly. The site separates urgent help, prevention advice, community programmes, and volunteer routes so visitors do not have to decode a generic services page.` : isShoe ? `${brief.businessName} is built for shoppers who want sale prices without a messy bargain-bin experience. The site makes stock feel curated, easy to compare, and simple to enquire about.` : isRestaurant ? `${brief.businessName} is built around appetite, atmosphere, and practical booking details. The website makes the menu easy to scan and the decision to visit feel natural.` : isSoftware ? `${brief.businessName} is built for teams who need to understand value quickly. The website shows the product promise, practical workflows, and the next step toward a demo.` : isAdvisory ? `${brief.businessName} is built for directors who need straight answers, confidentiality, and credible options before insolvency or restructuring decisions become harder to control.` : isPhysio ? `${brief.businessName} is built for people who want to understand pain, movement, treatment options, and recovery steps before they book. The site makes the clinic feel calm, credible, and practical from the first screen.` : `${brief.businessName} is built for visitors who need clear information, relevant proof, and a confident route to enquiry.`,
     aboutParagraphs: isShoe ? [
       `${brief.businessName} focuses on clean, easy-to-browse shoe offers for customers who want style and value without confusion.`,
       `Collections are organised around how people actually shop: everyday pairs, smarter options, new arrivals, and sale highlights that are easy to scan.`,
@@ -145,6 +151,10 @@ export function fallbackContent(brief) {
       { title: 'Confidential first step', text: 'Directors can understand their options before a formal process or public pressure changes the conversation.' },
       { title: 'Practical restructuring advice', text: 'The site explains recovery, negotiation, and insolvency routes without frightening visitors or oversimplifying risk.' },
       { title: 'Credible professional tone', text: 'Copy, layout, and proof points are designed to feel composed, discreet, and commercially serious.' }
+    ] : isPhysio ? [
+      { title: 'Assessment before assumptions', text: 'Visitors see that treatment starts with movement history, symptoms, goals, and what daily life currently demands.' },
+      { title: 'Treatment plans people can follow', text: 'The copy explains hands-on care, exercise guidance, review points, and home routines in plain language.' },
+      { title: 'Confidence between sessions', text: 'FAQs, aftercare notes, and contact prompts reduce uncertainty before and after the first appointment.' }
     ] : [
       { title: 'Clear offer', text: 'Visitors can understand what is available and who it is for without reading a wall of generic copy.' },
       { title: 'Relevant proof', text: 'The site uses proof points that match the business type and visitor decision.' },
@@ -152,8 +162,8 @@ export function fallbackContent(brief) {
     ],
     services: brief.services.map((title) => ({
       title,
-      description: fallbackServiceDescription(brief, title, { isShoe, isRestaurant, isSoftware, isAdvisory, isPhysio, isDental, isGym }),
-      bullets: fallbackServiceBullets({ isShoe, isRestaurant, isSoftware, isAdvisory, isPhysio, isDental, isGym }),
+      description: fallbackServiceDescription(brief, title, { isShoe, isRestaurant, isSoftware, isAdvisory, isPhysio, isDental, isGym, isCivic }),
+      bullets: fallbackServiceBullets({ isShoe, isRestaurant, isSoftware, isAdvisory, isPhysio, isDental, isGym, isCivic }),
       outcome: serviceOutcome
     })),
     processSteps: isShoe ? [
@@ -169,8 +179,38 @@ export function fallbackContent(brief) {
       { title: 'Map the route', text: 'Visitors see how assessment, treatment, guidance, and review points fit together before they commit.' },
       { title: 'Make action easy', text: 'The design keeps booking, calling, and asking a question visible without making the page feel pushy.' }
     ],
-    trustSignals: isShoe ? ['Clear sale pricing', 'Size guidance', 'Customer support', 'Easy product browsing'] : isAdvisory ? ['Confidential consultations', 'Director-focused advice', 'Restructuring options', 'Measured professional guidance'] : ['Manchester-based team', 'Clear treatment plans', 'Evidence-led decisions', 'Practical home guidance'],
-    localProof: isShoe ? `${brief.businessName} is positioned as a clean, trustworthy shoe sale brand with a shopping journey designed to attract more customers.` : isAdvisory ? `Based in ${brief.location}, ${brief.businessName} is positioned for directors who need confidential business advisory, insolvency, and restructuring guidance before pressure escalates.` : `Based in ${brief.location}, ${brief.businessName} is positioned as a local specialist with enough polish to reassure private clients and enough clarity to convert cautious first-time visitors.`,
+    trustSignals: isShoe ? ['Clear sale pricing', 'Size guidance', 'Customer support', 'Easy product browsing'] : isAdvisory ? ['Confidential consultations', 'Director-focused advice', 'Restructuring options', 'Measured professional guidance'] : isPhysio ? [`${brief.location}-based clinic`, 'Clear treatment plans', 'Evidence-led decisions', 'Practical home guidance'] : [`${brief.location}-based team`, 'Clear service route', 'Relevant proof', 'Practical guidance'],
+    localProof: isShoe ? `${brief.businessName} is positioned as a clean, trustworthy shoe sale brand with a shopping journey designed to attract more customers.` : isAdvisory ? `Based in ${brief.location}, ${brief.businessName} is positioned for directors who need confidential business advisory, insolvency, and restructuring guidance before pressure escalates.` : isPhysio ? `Based in ${brief.location}, ${brief.businessName} is positioned for people comparing physiotherapy care, recovery plans, movement confidence, and a clear route to booking.` : `Based in ${brief.location}, ${brief.businessName} is positioned as a local specialist with enough polish to reassure private clients and enough clarity to convert cautious first-time visitors.`,
+    researchBrief: {
+      marketContext: isShoe
+        ? 'Footwear shoppers compare style, price, size confidence, returns reassurance, and whether the store feels trustworthy before asking about stock.'
+        : isRestaurant
+          ? 'Restaurant visitors want to understand menu style, atmosphere, opening details, location, booking friction, and whether the place fits the occasion.'
+          : isSoftware
+            ? 'Software buyers compare workflow fit, integrations, pricing expectations, implementation effort, proof, and how easy it is to book a demo.'
+            : isAdvisory
+              ? 'Professional advisory visitors are usually cautious. They compare confidentiality, competence, sector relevance, likely next steps, and whether contacting the firm feels low risk.'
+              : `${brief.industry} visitors usually compare trust, clarity, local relevance, proof, and the ease of taking the first step before they enquire.`,
+      visitorObjections: isShoe
+        ? ['Is my size available?', 'Are the prices and product notes clear?', 'Can I trust delivery, returns, and support?']
+        : isAdvisory
+          ? ['Will the first conversation be confidential?', 'Is this firm credible enough for a serious situation?', 'What happens after I send a message?']
+          : ['Can I trust this business?', 'Is this service right for my situation?', 'What happens after I make contact?'],
+      proofRequired: isShoe
+        ? ['Product categories', 'Sale pricing', 'Fit guidance', 'Delivery and support reassurance', 'Customer reviews']
+        : isAdvisory
+          ? ['Confidential first step', 'Service routes', 'Senior-led process', 'Useful FAQs', 'Local and sector relevance']
+          : ['Clear services', 'Specific process', 'Testimonials', 'Useful FAQs', `${brief.location} relevance`],
+      localSeoAngle: `Connect ${brief.industry} intent with ${brief.location} search language, service detail, FAQs, and a clear contact route.`,
+      contentGaps: ['Exact prices, opening hours, certifications, named case studies, and real customer quotes should be supplied by the operator if they matter.']
+    },
+    layoutGuidance: {
+      header: 'Use a visible sticky header with brand, concise navigation, and one primary action. Keep it usable on mobile.',
+      hero: 'Use a balanced first viewport with a specific headline, trust signal, CTA, and relevant visual or proof panel.',
+      sectionRhythm: 'Alternate proof, services, process, FAQ, visual, and CTA sections with consistent spacing and constrained text widths.',
+      mobile: 'Stack grids cleanly, preserve tap targets, keep navigation visible, and prevent horizontal overflow.',
+      ctaPlacement: 'Place the main action above the fold, after proof, and again in the final CTA.'
+    },
     seoStrategy: {
       primaryKeywords: fallbackSeoKeywords(brief).primary,
       secondaryKeywords: fallbackSeoKeywords(brief).secondary,
@@ -293,6 +333,7 @@ function fallbackSeoKeywords(brief) {
 }
 
 function fallbackServiceDescription(brief, title, flags) {
+  if (brief.industry === 'Fire and Community Safety') return `${title} is presented with public-service clarity: what the visitor should do, when it is urgent, what information to prepare, and which contact route is appropriate.`;
   if (flags.isShoe) return `${title} is presented with sale-aware product copy, clear style notes, likely use cases, and enough buying confidence for visitors to compare pairs without feeling lost.`;
   if (flags.isRestaurant) return `${title} is written as a genuine menu highlight, connecting ingredients, atmosphere, visit timing, and booking intent so diners can picture the experience before they arrive.`;
   if (flags.isSoftware) return `${title} is framed around the workflow it improves, the pressure it removes from teams, and the practical reason a visitor should request a demo.`;
@@ -304,6 +345,7 @@ function fallbackServiceDescription(brief, title, flags) {
 }
 
 function fallbackServiceBullets(flags) {
+  if (flags.isCivic) return ['Urgent and non-urgent routes separated', 'Plain safety guidance', 'Clear next contact step'];
   if (flags.isShoe) return ['Sale price context and product value', 'Fit, material, and styling guidance', 'Quick route to enquiry or purchase'];
   if (flags.isRestaurant) return ['Ingredient or menu detail', 'Best time or occasion to book', 'Reservation and location cue'];
   if (flags.isSoftware) return ['Workflow before and after', 'Role-specific use case', 'Demo or integration prompt'];
@@ -315,6 +357,7 @@ function fallbackServiceBullets(flags) {
 }
 
 export function fallbackTokens(brief) {
+  const isCare = /physio|physiotherapy|clinic|dental|health|therapy|medical|wellness/i.test(`${brief.industry || ''} ${brief.tone || ''}`);
   return {
     colors: {
       primary: brief.colourScheme.primary,
@@ -326,9 +369,9 @@ export function fallbackTokens(brief) {
       darkSurface: '#10191d',
       darkInk: '#f5fbfd'
     },
-    fonts: { display: 'Cormorant Garamond', body: 'Inter' },
-    radius: { sm: '6px', md: '8px', lg: '14px' },
-    shadow: { sm: '0 4px 18px rgba(15, 95, 134, .08)', md: '0 18px 45px rgba(18, 32, 38, .12)' },
+    fonts: { display: isCare ? 'Manrope' : 'Source Serif 4', body: 'Inter' },
+    radius: { sm: '6px', md: '10px', lg: '18px' },
+    shadow: { sm: '0 10px 28px rgba(15, 95, 134, .08)', md: '0 24px 70px rgba(18, 32, 38, .12)' },
     spacing: { xs: '.5rem', sm: '1rem', md: '1.5rem', lg: '2.5rem', xl: '4rem' }
   };
 }

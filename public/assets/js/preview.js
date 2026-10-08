@@ -65,7 +65,8 @@ feedbackForm.addEventListener('submit', async (event) => {
     return;
   }
   const data = await response.json();
-  feedbackStatus.textContent = `Saved. ${data.learningRules} learning signal${data.learningRules === 1 ? '' : 's'} now influence future sites.`;
+  const mysqlNote = data.mysqlSaved ? ' MySQL mirror updated.' : ' Saved locally; MySQL mirror is not configured or unavailable.';
+  feedbackStatus.textContent = `Saved. ${data.learningRules} learning signal${data.learningRules === 1 ? '' : 's'} now influence future sites.${mysqlNote}`;
   feedbackForm.reset();
 });
 

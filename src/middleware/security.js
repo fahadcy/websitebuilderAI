@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 
 export const generationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  limit: 5,
+  limit: Number(process.env.GENERATION_LIMIT_PER_HOUR || 5),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Generation limit reached. Try again in an hour.' }

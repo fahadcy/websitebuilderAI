@@ -1,22 +1,71 @@
 import OpenAI from 'openai';
-import { analysisPrompt, contentPrompt, tokenPrompt, promptAnalysisSystem, contentGenerationSystem, designTokenSystem, eliteDesignerDirective } from './prompts.js';
+import { analysisPrompt, contentPrompt, tokenPrompt, promptAnalysisSystem, contentGenerationSystem, designTokenSystem, eliteDesignerDirective, qualityWebsiteContract } from './prompts.js';
 import { fallbackBrief, fallbackContent, fallbackTokens } from './fallback.js';
 
-const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const client = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: Number(process.env.OPENAI_TIMEOUT_MS || 90000),
+      maxRetries: Number(process.env.OPENAI_MAX_RETRIES ?? 2)
+    })
+  : null;
+
+const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
+
+// Reasoning models (gpt-5 family, o1/o3/o4) reject custom sampling params such as
+// temperature/top_p and only accept the default. Detect them up front, and also
+// remember at runtime if the API tells us a model refuses the parameter.
+const FIXED_SAMPLING_MODEL = /^(gpt-5|o\d)/i;
+let temperatureSupported = !FIXED_SAMPLING_MODEL.test(TEXT_MODEL);
+
+function configuredTemperature() {
+  const raw = process.env.OPENAI_TEXT_TEMPERATURE;
+  if (raw === undefined || raw === '') return 0.65;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0.65;
+}
+
+function isUnsupportedParamError(error, param) {
+  const message = String(error?.message || '');
+  return error?.status === 400 && (error?.param === param || message.includes(`'${param}'`)) && /unsupported/i.test(message);
+}
+
+function parseJsonResponse(text) {
+  const raw = String(text || '').trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Some models wrap JSON in markdown fences or add a sentence around it.
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start !== -1 && end > start) return JSON.parse(raw.slice(start, end + 1));
+    throw new Error('Model response was not valid JSON');
+  }
+}
 
 async function jsonCompletion(system, prompt) {
   if (!client) return null;
+  const request = {
+    model: TEXT_MODEL,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: prompt }
+    ]
+  };
   try {
-    const response = await client.chat.completions.create({
-      model: process.env.OPENAI_TEXT_MODEL || 'gpt-4o',
-      temperature: 0.65,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: prompt }
-      ]
-    });
-    return JSON.parse(response.choices[0].message.content);
+    let response;
+    try {
+      response = await client.chat.completions.create(
+        temperatureSupported ? { ...request, temperature: configuredTemperature() } : request
+      );
+    } catch (error) {
+      if (!temperatureSupported || !isUnsupportedParamError(error, 'temperature')) throw error;
+      temperatureSupported = false;
+      console.info(`OpenAI model "${TEXT_MODEL}" only supports the default temperature; retrying without it.`);
+      response = await client.chat.completions.create(request);
+    }
+    return parseJsonResponse(response.choices?.[0]?.message?.content);
   } catch (error) {
     console.warn(`OpenAI generation unavailable, using local fallback: ${error.message}`);
     return null;
@@ -44,6 +93,7 @@ export async function reviewPrompt(rawPrompt) {
   const prompt = String(rawPrompt || '').trim().slice(0, 1600);
   const generated = await jsonCompletion(
     `${eliteDesignerDirective}
+${qualityWebsiteContract}
 
 You clean, enhance, and strategically expand spoken website-builder prompts. Return strict JSON only. The review must make the future website feel fresh, intentional, conversion-led, and non-repetitive.`,
     `Clean this rough spoken prompt, correct obvious speech-recognition mistakes, preserve the user's intent, and produce a better website-generation brief.
@@ -70,7 +120,7 @@ Return JSON with:
   ],
   "blueprint": {
     "businessType": "...",
-    "projectNature": "commerce | hospitality | care | professional | fitness | portfolio | software | property | event | education | service",
+    "projectNature": "commerce | hospitality | care | professional | fitness | portfolio | software | property | event | education | civic | service",
     "primaryGoal": "...",
     "audience": "...",
     "visualStrategy": "specific design direction based on the nature of this project, not a generic website style",
@@ -117,7 +167,7 @@ Return JSON with:
   ]
 }
 
-Do not choose every standard page by habit. First classify the projectNature from the prompt. Then choose pages, sections, content priorities, and layoutArchetypes that fit that nature. A restaurant needs menu/reservation/hours logic. A shop needs product/category/sale logic. A clinic needs trust/treatment/booking logic. A SaaS product needs product/demo/pricing logic. A portfolio needs case-study/work logic. Do not make different project types share the same homepage structure.
+Do not choose every standard page by habit. First classify the projectNature from the prompt. Then choose pages, sections, content priorities, and layoutArchetypes that fit that nature. A restaurant needs menu/reservation/hours logic. A shop needs product/category/sale logic. A clinic needs trust/treatment/booking logic. A SaaS product needs product/demo/pricing logic. A portfolio needs case-study/work logic. A fire station, emergency service, public safety, charity, council, or community organisation needs civic/public-service logic, not courses just because it offers training. Do not make different project types share the same homepage structure.
 
 Apply this internal design process before returning JSON:
 1. Identify the exact business, goal, target audience emotional state, primary conversion, tone, visual language, and 1-2 memorable creative twists.
@@ -244,6 +294,8 @@ function normalizeContent(content, brief) {
     })),
     trustSignals: Array.isArray(source.trustSignals) ? source.trustSignals : fallback.trustSignals,
     localProof: source.localProof || fallback.localProof,
+    researchBrief: normalizeResearchBrief(source.researchBrief, fallback.researchBrief, brief),
+    layoutGuidance: normalizeLayoutGuidance(source.layoutGuidance, fallback.layoutGuidance, brief),
     conversionPrompts: conversionPrompts.map((prompt, index) => ({
       title: prompt.title || fallback.conversionPrompts[index % fallback.conversionPrompts.length].title,
       text: prompt.text || prompt.description || fallback.conversionPrompts[index % fallback.conversionPrompts.length].text,
@@ -277,6 +329,32 @@ function normalizeContent(content, brief) {
       bookingReassurance: source.microcopy?.bookingReassurance || fallback.microcopy.bookingReassurance
     },
     privacyPolicy: source.privacyPolicy || fallback.privacyPolicy
+  };
+}
+
+function normalizeResearchBrief(value, fallback, brief = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const safeFallback = fallback || {};
+  const industry = brief.industry || 'service';
+  const location = brief.location || 'local area';
+  return {
+    marketContext: stringValue(source.marketContext, safeFallback.marketContext || `${industry} visitors usually compare trust, clarity, proof, location, and the ease of taking the next step before they enquire.`),
+    visitorObjections: normalizeStringArray(source.visitorObjections, safeFallback.visitorObjections || ['Can I trust this business?', 'Is the offer right for my situation?', 'What happens after I make contact?']).slice(0, 6),
+    proofRequired: normalizeStringArray(source.proofRequired, safeFallback.proofRequired || ['Clear services', 'Useful testimonials', 'Specific next steps', `${location} relevance`]).slice(0, 6),
+    localSeoAngle: stringValue(source.localSeoAngle, safeFallback.localSeoAngle || `Connect ${industry} search intent with ${location} proof, service pages, FAQs, and practical contact routes.`),
+    contentGaps: normalizeStringArray(source.contentGaps, safeFallback.contentGaps || ['Exact prices, opening hours, credentials, and named case studies should be supplied by the operator if they matter.']).slice(0, 6)
+  };
+}
+
+function normalizeLayoutGuidance(value, fallback, brief = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const safeFallback = fallback || {};
+  return {
+    header: stringValue(source.header, safeFallback.header || 'Use a visible sticky header with brand, concise navigation, and one primary action. Keep it usable on mobile.'),
+    hero: stringValue(source.hero, safeFallback.hero || 'Use a balanced first viewport with a specific headline, trust signal, CTA, and relevant image or proof panel.'),
+    sectionRhythm: stringValue(source.sectionRhythm, safeFallback.sectionRhythm || 'Alternate copy-led, proof-led, visual, FAQ, and CTA sections with consistent spacing and constrained text widths.'),
+    mobile: stringValue(source.mobile, safeFallback.mobile || 'Stack grids cleanly, keep navigation visible, avoid overlapping text, and preserve comfortable tap targets.'),
+    ctaPlacement: stringValue(source.ctaPlacement, safeFallback.ctaPlacement || `Keep the main ${brief.businessName || 'business'} enquiry action above the fold, after proof, and in the final CTA.`)
   };
 }
 
@@ -539,6 +617,9 @@ function questionsForReviewNature(nature, pages) {
   if (nature === 'care') {
     questions.push({ id: 'care_details', label: 'Care details', question: 'Which treatments, practitioner names, patient reassurance, or booking details matter?', type: 'textarea', placeholder: 'Nervous patients, whitening, emergency care, Dr...', required: false, appliesTo: ['Treatments', 'Practitioners'] });
   }
+  if (nature === 'civic') {
+    questions.push({ id: 'civic_details', label: 'Civic details', question: 'Which emergency services, community programmes, safety advice, opening details, or reporting routes matter?', type: 'textarea', placeholder: 'Fire safety checks, incident reporting, school visits, volunteer route...', required: false, appliesTo: ['Services', 'Safety Advice', 'Contact'] });
+  }
   return questions;
 }
 
@@ -546,6 +627,7 @@ function inferReviewNature(lower, isShoe) {
   if (isShoe || /shop|retail|e-?commerce|store|product|fashion/.test(lower)) return 'commerce';
   if (/restaurant|cafe|bar|bakery|takeaway|menu|reservation/.test(lower)) return 'hospitality';
   if (/clinic|dental|physio|health|therapy|medical|wellness|salon|spa/.test(lower)) return 'care';
+  if (/fire station|fire brigade|fire service|fire safety|emergency service|ambulance|rescue|public safety|community safety|council|charity|nonprofit|non-profit|volunteer service/.test(lower)) return 'civic';
   if (/school|course|education|academy|tutor|tuition|student|gcse|a-level|maths|english|exam|revision|training/.test(lower)) return 'education';
   if (/law|legal|solicitor|accountant|finance|consult/.test(lower)) return 'professional';
   if (/gym|fitness|trainer|yoga|pilates/.test(lower)) return 'fitness';
@@ -568,6 +650,7 @@ function pagesForNature(nature, promptText = '') {
     property: ['Home', 'Properties', 'Valuation', 'Landlords', 'Area Guides', 'Contact', 'Privacy Policy'],
     event: ['Home', 'Schedule', 'Speakers', 'Tickets', 'Venue', 'Contact', 'Privacy Policy'],
     education: ['Home', 'Courses', 'Admissions', 'Tutors', 'Results', 'Contact', 'Privacy Policy'],
+    civic: ['Home', 'Emergency Help', 'Safety Advice', 'Community Programmes', 'Volunteer', 'Contact', 'Privacy Policy'],
     service: ['Home', 'About', 'Services', 'Team', 'Blog', 'Contact', 'Privacy Policy']
   };
   const selected = [...(pages[nature] || pages.service)];
@@ -601,7 +684,8 @@ function featuresForNature(nature) {
     software: ['Product sections', 'Use cases', 'Pricing placeholder', 'Demo CTA', 'Resource pages', 'Admin CMS'],
     property: ['Property listings', 'Search panel', 'Valuation CTA', 'Area guides', 'Google Maps', 'Admin CMS'],
     event: ['Schedule', 'Speakers', 'Ticket CTA', 'Venue map', 'FAQ', 'Admin CMS'],
-    education: ['Course listings', 'Admissions CTA', 'Tutor profiles', 'Results proof', 'FAQ', 'Admin CMS']
+    education: ['Course listings', 'Admissions CTA', 'Tutor profiles', 'Results proof', 'FAQ', 'Admin CMS'],
+    civic: ['Emergency information', 'Safety advice hub', 'Community programme pages', 'Volunteer enquiry', 'Contact form', 'Google Maps', 'Admin CMS']
   };
   return features[nature] || ['Service sections', 'Testimonials', 'FAQ', 'Contact form', 'Google Maps', 'SEO metadata', 'Admin CMS'];
 }
@@ -683,6 +767,9 @@ function buildFallbackBlueprint({ businessName, business, isShoe, nature = 'serv
 
 function fallbackLayoutArchetype(lower, isShoe) {
   if (lower === 'home') return isShoe ? 'heroShowcase' : 'heroEditorial';
+  if (lower.includes('emergency')) return 'genericChecklist';
+  if (lower.includes('safety')) return 'genericMosaic';
+  if (lower.includes('community') || lower.includes('volunteer')) return 'genericEditorial';
   if (lower === 'shop') return 'catalogRows';
   if (lower === 'sale') return 'campaignComparison';
   if (lower === 'new arrivals') return 'lookbookLead';
@@ -707,6 +794,7 @@ function businessTypeForNature(nature, isShoe) {
     property: 'property or real estate business',
     event: 'event, venue, or ticketed experience',
     education: 'education or training provider',
+    civic: 'civic, emergency, or public safety service',
     service: 'local service business'
   }[nature] || 'local service business';
 }
@@ -723,7 +811,8 @@ function goalForNature(nature, isShoe) {
     software: 'Explain the product, show use cases, and generate demo requests.',
     property: 'Help visitors browse listings and request valuations or viewings.',
     event: 'Sell tickets and make schedule, speakers, and venue information clear.',
-    education: 'Promote courses and convert visitors into enquiries or applications.'
+    education: 'Promote courses and convert visitors into enquiries or applications.',
+    civic: 'Help the public find emergency guidance, safety services, community programmes, and the right contact route.'
   }[nature] || 'Attract qualified enquiries and make the business feel trustworthy.';
 }
 
@@ -738,7 +827,8 @@ function audienceForNature(nature, isShoe) {
     software: 'Operators and teams looking for a clearer way to solve a workflow problem.',
     property: 'Buyers, renters, landlords, or sellers comparing property options.',
     event: 'Attendees deciding whether the event is worth their time and ticket.',
-    education: 'Students, parents, or professionals comparing learning outcomes.'
+    education: 'Students, parents, or professionals comparing learning outcomes.',
+    civic: 'Residents, local families, organisations, and volunteers looking for safety information or help.'
   }[nature] || 'Local customers looking for a trustworthy provider.';
 }
 
@@ -753,7 +843,8 @@ function visualStrategyForNature(nature, isShoe) {
     software: 'Use product-dashboard compositions, feature flows, use-case cards, demo CTAs, and pricing logic.',
     property: 'Use listing-led layouts, search panels, valuation CTAs, area guides, and map/property imagery.',
     event: 'Use poster-like hero sections, schedule boards, speaker/ticket CTAs, and venue information.',
-    education: 'Use course grids, learning paths, tutor proof, admissions CTAs, and outcomes.'
+    education: 'Use course grids, learning paths, tutor proof, admissions CTAs, and outcomes.',
+    civic: 'Use public-service composition: urgent-action panels, safety guidance, community proof, incident routes, volunteer prompts, and calm authority.'
   }[nature] || 'Use trust-led service composition with proof, process, service clarity, and a low-friction enquiry path.';
 }
 
@@ -768,7 +859,8 @@ function conversionPathForNature(nature, isShoe) {
     software: ['Understand product promise', 'See workflows', 'Compare use cases', 'Request demo'],
     property: ['Search by need', 'Compare listings', 'Trust local expertise', 'Book viewing or valuation'],
     event: ['Understand the event', 'Check schedule', 'Trust venue/speakers', 'Buy ticket'],
-    education: ['Understand outcomes', 'Compare courses', 'Trust tutors/results', 'Apply or enquire']
+    education: ['Understand outcomes', 'Compare courses', 'Trust tutors/results', 'Apply or enquire'],
+    civic: ['Identify urgency', 'Find the right safety route', 'Trust public-service information', 'Contact, report, or volunteer']
   }[nature] || ['Understand offer', 'See proof', 'Choose service', 'Send enquiry'];
 }
 
@@ -788,7 +880,8 @@ function conversionForNature(lower, nature) {
     software: 'Demo request',
     property: 'Viewing or valuation',
     event: 'Ticket purchase',
-    education: 'Course enquiry'
+    education: 'Course enquiry',
+    civic: 'Safety enquiry or public contact'
   }[nature] || 'Contact enquiry';
 }
 

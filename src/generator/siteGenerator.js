@@ -6,8 +6,10 @@ import { analysePrompt, generateContent, generateTokens } from '../ai/openaiClie
 import { generateSiteImages } from '../ai/imageAssets.js';
 import { createZip } from '../packager/zipper.js';
 import { db } from '../db/database.js';
+import { recordGenerationForTraining } from '../db/mysqlTrainingStore.js';
 import { runRealityCheck, realityCheckMarkdown } from '../quality/realityCheck.js';
 import { getLearningContext } from '../learning/feedbackMemory.js';
+import { generatePipelineSite } from './pipelineGenerator.js';
 
 const root = process.cwd();
 
@@ -43,15 +45,18 @@ function applyFontPreference(tokens, fontPreference) {
 function applyRoyalTypography(tokens, brief, metadata = {}) {
   if (metadata.fontPreference) return tokens;
   const text = `${brief?.industry || ''} ${brief?.tone || ''} ${metadata?.prompt || ''}`.toLowerCase();
-  const display = /luxury|law|legal|finance|advisory|insolvency|restructuring|consult|accountant|estate|property|clinic|dental/.test(text)
-    ? 'Cormorant Garamond'
-    : 'Libre Baskerville';
+  const isCare = /physio|physiotherapy|clinic|dental|health|therapy|medical|wellness/.test(text);
+  const display = isCare
+    ? 'Manrope'
+    : /luxury|law|legal|finance|advisory|insolvency|restructuring|consult|accountant|estate|property/.test(text)
+      ? 'Source Serif 4'
+      : 'Manrope';
   return {
     ...tokens,
     fonts: {
       ...tokens.fonts,
       display,
-      body: 'Inter'
+      body: isCare ? 'Inter' : 'Inter'
     }
   };
 }
@@ -136,7 +141,8 @@ function descriptionForNature(nature, title) {
     commerce: `${title} presented with clear pricing, fit notes, and a simple path to enquiry or purchase.`,
     hospitality: `${title} presented as a menu or visit highlight with enough detail to help guests choose.`,
     software: `${title} explained as a product capability connected to a practical workflow outcome.`,
-    care: `${title} explained with reassurance, process clarity, and a simple booking route.`
+    care: `${title} explained with reassurance, process clarity, and a simple booking route.`,
+    civic: `${title} explained with urgency, public guidance, location context, and the right contact route.`
   };
   return map[nature] || `${title} explained with relevant proof, useful detail, and a clear next step.`;
 }
@@ -146,7 +152,8 @@ function bulletsForNature(nature) {
     commerce: ['Price and availability', 'Style or fit note', 'Enquiry or purchase CTA'],
     hospitality: ['Menu detail', 'Guest experience note', 'Booking prompt'],
     software: ['Workflow benefit', 'Integration or proof point', 'Demo prompt'],
-    care: ['Who it helps', 'What to expect', 'Booking reassurance']
+    care: ['Who it helps', 'What to expect', 'Booking reassurance'],
+    civic: ['Urgency level', 'Useful details to send', 'Right contact route']
   };
   return map[nature] || ['Clear detail', 'Relevant proof', 'Next step'];
 }
@@ -177,7 +184,8 @@ function applySeoKeywordStrategy(site) {
   site.content.faqs = site.content.faqs.map((faq, index) => {
     const topic = site.content.services[index % Math.max(site.content.services.length, 1)]?.title;
     if (!topic || /local|nearby|Manchester/i.test(faq.answer)) return faq;
-    const action = projectNature(site) === 'professional' ? 'before making an enquiry' : 'before booking';
+    const nature = projectNature(site);
+    const action = nature === 'professional' ? 'before making an enquiry' : nature === 'civic' ? 'before contacting the right team' : 'before booking';
     return { ...faq, answer: `${faq.answer} This gives local visitors another practical way to compare ${topic.toLowerCase()} options ${action}.` };
   });
   if (site.content.faqs[0]) {
@@ -232,6 +240,8 @@ function uniqueList(items) {
 }
 
 export async function generateSite(prompt, progress, metadata = {}) {
+  return generatePipelineSite(prompt, progress, metadata);
+
   progress({ status: 'running', progress: 8, message: 'Analysing your prompt' });
   const brief = await analysePrompt(prompt);
   applyCompanyHouseToBrief(brief, metadata);
@@ -280,6 +290,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
   applySeoKeywordStrategy(site);
   site.designIntelligence = buildDesignIntelligence(site);
   site.templateProfile = chooseTemplateProfile(site);
+  applyQualityFloor(site);
   progress({ status: 'running', progress: 24, message: 'Infusing keywords naturally into page content' });
   const imageResult = await generateSiteImages(site, outDir, progress);
   site.assetMap = imageResult.assetMap || {};
@@ -297,6 +308,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
     ['creative-brief.md', creativeBrief(site)],
     ['learning-memory.md', learningMemoryReport(site)],
     ['seo-keyword-report.md', seoKeywordReport(site)],
+    ['research-and-strategy.md', researchAndStrategyReport(site)],
     ['production-plan.md', productionPlan(site)],
     ['style-guide.html', styleGuide(site)],
     ['database.sql', generatedDatabaseSql()],
@@ -336,6 +348,7 @@ export async function generateSite(prompt, progress, metadata = {}) {
   const zipPath = await createZip(outDir, siteId);
   db.prepare('INSERT INTO generated_sites (id, business_name, industry, prompt, status, output_path, zip_path, domain_name, logo_path, reality_check_score, reality_check_report, reality_check_verdict) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(siteId, brief.businessName, brief.industry, prompt, 'complete', outDir, zipPath, metadata.domainName || null, logoFile, audit.score, JSON.stringify(audit), audit.verdict);
+  await recordGenerationForTraining({ site, prompt, outDir, zipPath, audit });
   return { siteId, outDir, zipPath };
 }
 
@@ -393,6 +406,7 @@ function megaTitle(site) {
   const nature = projectNature(site);
   if (nature === 'commerce') return 'Shop by customer intent';
   if (nature === 'education') return 'Learning routes';
+  if (nature === 'civic') return 'Public safety routes';
   if (nature === 'professional') return 'Advisory routes';
   if (nature === 'care') return 'Treatments and reassurance';
   return 'Useful routes';
@@ -416,7 +430,7 @@ function headerBrandMode(site) {
   const seed = hashNumber(`${site.generationSeed}-${site.brief.businessName}-${nature}`);
   const hasLogo = Boolean(site.logoFile);
   const showName = !hasLogo;
-  const size = nature === 'commerce' || nature === 'portfolio' ? 'large' : nature === 'professional' || nature === 'education' ? 'medium' : seed % 2 ? 'medium' : 'large';
+  const size = nature === 'commerce' || nature === 'portfolio' ? 'large' : nature === 'professional' || nature === 'education' || nature === 'civic' ? 'medium' : seed % 2 ? 'medium' : 'large';
   const layout = !showName ? 'logo-only' : seed % 4 === 0 ? 'stacked' : 'inline';
   return { showName, size, layout };
 }
@@ -445,6 +459,7 @@ function headerDesign(site) {
     property: ['stacked', 'classic', 'minimal', 'split'],
     event: ['split', 'editorial', 'minimal', 'classic'],
     education: ['stacked', 'classic', 'minimal', 'editorial'],
+    civic: ['classic', 'stacked', 'editorial', 'minimal'],
     service: ['classic', 'minimal', 'stacked', 'split', 'editorial']
   };
   const choices = layoutsByNature[nature] || layoutsByNature.service;
@@ -466,6 +481,7 @@ function navLinks(site) {
       hospitality: [['#home', 'Home'], ['#menu', 'Menu'], ['#booking', 'Booking'], ['#proof', 'Reviews'], ['#contact', 'Contact']],
       professional: [['#home', 'Brief'], ['#services', 'Services'], ['#proof', 'Proof'], ['#process', 'Process'], ['#contact', 'Enquiry']],
       education: [['#home', 'Home'], ['#courses', 'Courses'], ['#outcomes', 'Outcomes'], ['#faq', 'FAQ'], ['#contact', 'Enquire']],
+      civic: [['#home', 'Home'], ['#services', 'Help'], ['#process', 'Safety'], ['#proof', 'Community'], ['#contact', 'Contact']],
       portfolio: [['#home', 'Intro'], ['#work', 'Work'], ['#proof', 'Proof'], ['#contact', 'Contact']],
       software: [['#home', 'Product'], ['#features', 'Features'], ['#proof', 'Proof'], ['#contact', 'Demo']]
     };
@@ -494,6 +510,7 @@ function autoBlueprintFromBrief(brief, prompt = '') {
     property: ['Home', 'Properties', 'Valuation', 'Area Guides', 'Contact'],
     event: ['Home', 'Schedule', 'Tickets', 'Venue', 'Contact'],
     education: ['Home', 'Courses', 'Admissions', 'Tutors', 'Contact'],
+    civic: ['Home', 'Emergency Help', 'Safety Advice', 'Community Programmes', 'Volunteer', 'Contact'],
     service: ['Home', 'About', 'Services', 'Team', 'Blog', 'Contact']
   };
   const pageTitles = pagesByNature[nature] || pagesByNature.service;
@@ -507,13 +524,45 @@ function autoBlueprintFromBrief(brief, prompt = '') {
     pages: pageTitles.map((title) => ({
       title,
       slug: title.toLowerCase() === 'home' ? 'index' : slugify(title, { lower: true, strict: true }),
-      purpose: `${title} page for ${brief.businessName}, shaped for a ${nature} project.`,
+      purpose: blueprintPagePurpose(nature, title, brief),
       sections: sectionsForNaturePage(nature, title),
-      conversionTarget: title.toLowerCase().includes('contact') ? 'Contact enquiry' : 'Next relevant action'
+      conversionTarget: blueprintConversionTarget(nature, title)
     })),
     features: [],
     internalPrompt: `Generate pages based on the ${nature} nature of the project. Do not use a generic layout.`
   };
+}
+
+function blueprintPagePurpose(nature, title, brief) {
+  const lower = String(title || '').toLowerCase();
+  if (nature === 'civic') {
+    if (lower === 'home') return `Make ${brief.businessName} feel like a clear public-safety hub for urgent help, prevention advice, community programmes, and contact routes.`;
+    if (/emergency/.test(lower)) return 'Separate urgent emergency guidance from routine enquiries and help visitors act without confusion.';
+    if (/safety/.test(lower)) return 'Give residents and organisations practical prevention advice, visit routes, and clear safety checks.';
+    if (/community/.test(lower)) return 'Show public programmes, school visits, local support, and prevention outreach with a clear request path.';
+    if (/volunteer/.test(lower)) return 'Explain how people can support the station or service and what to include in a volunteer enquiry.';
+    if (/contact/.test(lower)) return `Route ${brief.businessName} enquiries by urgency, safety topic, location, and contact details.`;
+  }
+  if (nature === 'care') {
+    if (lower === 'home') return `Show ${brief.businessName} as a calm, credible clinic and help visitors understand the safest first step.`;
+    if (/treatment/.test(lower)) return 'Explain treatment routes, who each option helps, what happens in session one, and how progress is reviewed.';
+    if (/practitioner/.test(lower)) return 'Introduce clinicians with enough human detail, focus areas, and reassurance for visitors to trust who they will meet.';
+    if (/patient/.test(lower)) return 'Prepare visitors for booking, first appointment expectations, what to bring, and common questions before they commit.';
+    if (/contact/.test(lower)) return `Make it easy to contact ${brief.businessName}, ask a question, find the clinic, and understand what happens after sending a message.`;
+  }
+  return `${title} page for ${brief.businessName}, shaped around the visitor decision rather than a generic page template.`;
+}
+
+function blueprintConversionTarget(nature, title) {
+  const lower = String(title || '').toLowerCase();
+  if (/contact/.test(lower)) return 'Send a qualified enquiry';
+  if (nature === 'civic' && /emergency/.test(lower)) return 'Find urgent guidance or the right emergency contact route';
+  if (nature === 'civic' && /safety|community/.test(lower)) return 'Request safety support or community programme information';
+  if (nature === 'civic' && /volunteer/.test(lower)) return 'Submit a volunteer or support enquiry';
+  if (nature === 'care' && /treatment/.test(lower)) return 'Choose a suitable treatment route or ask a clinical question';
+  if (nature === 'care' && /practitioner/.test(lower)) return 'Build trust in the team before booking';
+  if (nature === 'care' && /patient/.test(lower)) return 'Reduce uncertainty before booking';
+  return 'Take the next relevant action';
 }
 
 function sanitizeBlueprintForBusiness(site) {
@@ -538,6 +587,7 @@ function sanitizeBlueprintForBusiness(site) {
 
 function correctedProjectNature(site) {
   const text = `${site.brief.industry || ''} ${site.brief.businessName || ''} ${site.blueprint?.businessType || ''} ${site.blueprint?.primaryGoal || ''} ${site.metadata?.prompt || ''}`.toLowerCase();
+  if (/fire station|fire brigade|fire service|fire safety|emergency service|emergency response|ambulance|rescue|public safety|community safety|council|charity|nonprofit|non-profit|volunteer service/.test(text)) return 'civic';
   if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english|exam|revision|private tutor|online tutoring/.test(text)) return 'education';
   if (/insolvency|restructuring|business advisory|financial distress|advisory|accountant|accounting|consultant|consulting|finance|solicitor|law|legal|professional/.test(text)) return 'professional';
   if (/shoe|shop|retail|e-?commerce|store|product|fashion|clothing|jewellery|jewelry/.test(text)) return 'commerce';
@@ -568,6 +618,7 @@ function businessTypeLabel(nature, fallback) {
     property: 'property or real estate business',
     event: 'event or venue',
     software: 'software / SaaS product',
+    civic: 'civic, emergency, or public safety service',
     professional: 'professional services business'
   }[nature] || fallback || 'local service business';
 }
@@ -577,11 +628,98 @@ function applyNatureContentCorrections(site) {
   const prompt = String(site.metadata?.prompt || '').toLowerCase();
   const genericServiceTitles = (site.content.services || []).map((service) => String(service.title || '').toLowerCase()).join(' ');
   const genericCopy = /professional services|clearer way to choose|consultation planning delivery support/.test(`${site.brief.industry} ${site.content.hero?.headline} ${genericServiceTitles}`.toLowerCase());
-  if (!genericCopy && !/tutor|tuition|gcse|shoe|restaurant|clinic|software|property|corporate|law|legal|solicitor|insolvency|restructuring|accountant|accounting|consultant|consultancy|advisory/.test(prompt)) return;
+  if (!genericCopy && !/fire|emergency|rescue|public safety|community safety|tutor|tuition|gcse|shoe|restaurant|clinic|software|property|corporate|law|legal|solicitor|insolvency|restructuring|accountant|accounting|consultant|consultancy|advisory/.test(prompt)) return;
+  if (nature === 'civic') applyCivicContent(site);
   if (nature === 'education') applyEducationContent(site);
   if (nature === 'commerce' && /shoe|footwear|fashion|sale|shop|retail/.test(prompt)) applyShoeCommerceContent(site);
   if (nature === 'hospitality') applyHospitalityContent(site);
   if (nature === 'professional') applyProfessionalContent(site);
+}
+
+function applyCivicContent(site) {
+  const prompt = String(site.metadata?.prompt || '').toLowerCase();
+  site.brief.location = inferPromptLocation(site.metadata?.prompt, site.brief.location);
+  const isFire = /fire|brigade/.test(prompt) || /fire/i.test(site.brief.industry || site.brief.businessName || '');
+  const serviceName = isFire ? 'fire and community safety' : 'public safety';
+  const routes = isFire
+    ? ['Emergency response guidance', 'Home fire safety visits', 'Business fire safety checks', 'School and community visits', 'Volunteer support']
+    : ['Emergency help', 'Safety advice', 'Community support', 'Public reporting', 'Volunteer support'];
+  site.brief.industry = isFire ? 'Fire and Community Safety' : 'Civic and Public Safety';
+  if (/Manchester|King Street/i.test(site.brief.address || '')) site.brief.address = `${site.brief.location} public safety office`;
+  site.brief.seoKeywords = {
+    primary: [`${serviceName} in ${site.brief.location}`, `${site.brief.location} ${serviceName}`, `${site.brief.businessName} safety advice`],
+    secondary: routes.map((route) => `${route} ${site.brief.location}`),
+    localModifiers: [site.brief.location, `near ${site.brief.location}`, 'local safety', 'community support']
+  };
+  site.content.seoStrategy = {
+    primaryKeywords: site.brief.seoKeywords.primary,
+    secondaryKeywords: site.brief.seoKeywords.secondary,
+    localModifiers: site.brief.seoKeywords.localModifiers,
+    pageKeywordMap: {
+      Home: site.brief.seoKeywords.primary,
+      'Emergency Help': [`emergency response ${site.brief.location}`, `${site.brief.businessName} emergency contact`],
+      'Safety Advice': [`fire safety advice ${site.brief.location}`, `home fire safety ${site.brief.location}`],
+      Contact: [`${site.brief.businessName} contact`, `${serviceName} in ${site.brief.location}`]
+    },
+    densityTargets: { primary: '0.6-1.0%', secondary: '0.2-0.5%' },
+    naturalUsageNotes: 'Public safety keywords are used around practical guidance, reporting routes, and prevention advice without repeating emergency terms unnaturally.'
+  };
+  site.content.hero = {
+    ...site.content.hero,
+    kicker: `${site.brief.location} ${serviceName}`,
+    headline: `${site.brief.businessName} keeps urgent help, prevention advice, and community safety easy to find.`,
+    subtext: `A public-service website for residents, families, local organisations, and volunteers who need clear ${serviceName} information without digging through generic pages.`,
+    primaryCta: 'Find the right contact',
+    secondaryCta: 'Read safety advice'
+  };
+  site.content.services = routes.map((title) => ({
+    title,
+    description: `${title} explains what visitors should do, when the situation is urgent, what information helps the team respond, and which contact route is appropriate.`,
+    bullets: ['Urgent and non-urgent routes separated', 'Plain public guidance', 'Clear next contact step'],
+    outcome: 'Visitors understand the safest next step before they act.'
+  }));
+  site.content.differentiators = [
+    { title: 'Urgency separated from routine enquiries', text: 'The site keeps emergency routes, prevention advice, and general contact paths visually distinct so residents do not hesitate.' },
+    { title: 'Prevention made practical', text: 'Fire safety checks, home advice, business guidance, and school/community visits are written as usable public information.' },
+    { title: 'Community trust before forms', text: 'Stats, local proof, safety routes, and programme details show the station as a reliable community resource.' },
+    { title: 'Volunteer routes made clear', text: 'People who want to help can understand what to send, who responds, and what happens after their enquiry.' }
+  ];
+  site.content.trustSignals = [`${site.brief.location}-based public safety team`, 'Emergency and prevention routes', 'Community safety programmes', 'Volunteer enquiries welcome'];
+  site.content.localProof = `${site.brief.businessName} supports ${site.brief.location} with emergency guidance, prevention advice, community safety visits, and clear contact routes.`;
+  site.content.microcopy.contactHint = 'Tell us whether this is urgent, the location involved, the safety concern, and the best way to contact you.';
+  site.content.microcopy.bookingReassurance = 'If there is immediate danger, call emergency services first. For advice, visits, volunteering, or community programmes, this form routes the enquiry clearly.';
+  site.content.brandThesis = `${site.brief.businessName} is presented as a practical safety hub: urgent help is easy to identify, prevention advice is easy to understand, and community support has a clear next step.`;
+  site.content.conversionPrompts = [
+    { title: 'Need the right route quickly?', text: 'Choose emergency guidance, safety advice, community support, or volunteering without reading through a generic services page.', cta: 'Find the right contact' },
+    { title: 'Planning a safety visit or programme?', text: 'Send the location, audience, preferred dates, and the safety topic so the team can respond with the next step.', cta: 'Request support' }
+  ];
+  site.content.faqs = [
+    { question: 'What should I do in an emergency?', answer: 'If there is immediate danger, use the emergency number for your area first. The website separates urgent guidance from routine enquiries so visitors can act quickly.' },
+    { question: 'Can I request fire safety advice?', answer: `Yes. Residents and local organisations in ${site.brief.location} can use the enquiry form to ask about prevention advice, visits, or safety checks.` },
+    { question: 'Do you support schools and community groups?', answer: 'Community safety visits, talks, and prevention sessions can be requested with details of the audience, location, and preferred timing.' },
+    { question: 'How can I volunteer or support the station?', answer: 'Use the volunteer route and include your availability, interests, and any relevant experience. The team can explain suitable next steps.' },
+    { question: 'What information should I include?', answer: 'Share the address or area, the safety concern, whether it is urgent, and the best contact details for a response.' }
+  ];
+  site.content.stats = [
+    { value: '24', label: 'hour routine response aim' },
+    { value: String(routes.length), label: 'public safety routes' },
+    { value: '365', label: 'days emergency readiness' }
+  ];
+  site.content.processSteps = [
+    { title: 'Identify the need', text: 'Visitors first choose whether they need urgent help, safety advice, a community visit, or volunteer information.' },
+    { title: 'Share useful details', text: 'The site asks for location, urgency, contact details, and the specific safety concern before routing the enquiry.' },
+    { title: 'Get the right response', text: 'Emergency guidance, prevention requests, and community support routes are separated so the team can respond appropriately.' },
+    { title: 'Keep prevention visible', text: 'Advice, FAQs, and programme details help residents reduce risk before a problem becomes urgent.' }
+  ];
+  site.content.testimonials = [
+    { quote: 'The safety visit made the advice easy to understand and gave our family a clear checklist.', name: 'Local resident', context: 'Home safety visit' },
+    { quote: 'The team explained prevention in a practical way that worked for our staff.', name: 'Community organiser', context: 'Safety session' },
+    { quote: 'The website made it obvious where to ask about volunteering and what details to include.', name: 'Volunteer applicant', context: 'Community support' }
+  ];
+  site.content.blogPosts = [
+    { title: `What to check before requesting fire safety advice in ${site.brief.location}`, intro: 'A practical guide to the details that help a public safety team respond clearly.', category: 'Safety advice' },
+    { title: 'How community safety visits help prevent emergencies', intro: 'Why preparation, prevention, and local education matter before risk becomes urgent.', category: 'Community safety' }
+  ];
 }
 
 function applyProfessionalContent(site) {
@@ -782,6 +920,7 @@ function inferPromptLocation(prompt, fallback) {
 
 function primaryGoalForCorrectedNature(nature, site) {
   if (nature === 'education') return `Help parents and students understand ${site.brief.businessName}, compare tutoring options, trust the tutor, and enquire.`;
+  if (nature === 'civic') return `Help residents find emergency guidance, prevention advice, community programmes, and the right contact route for ${site.brief.businessName}.`;
   if (nature === 'commerce') return `Help customers browse products, trust the offer, and enquire or buy.`;
   if (nature === 'care') return `Build trust and convert visitors into bookings or enquiries.`;
   return `Create a ${nature} website for ${site.brief.businessName} that matches the customer intent in the prompt.`;
@@ -789,6 +928,7 @@ function primaryGoalForCorrectedNature(nature, site) {
 
 function visualStrategyForCorrectedNature(nature) {
   if (nature === 'education') return 'Use warm education-focused layouts: learning outcomes, subject pathways, tutor credibility, parent reassurance, testimonials, and enquiry CTAs. Avoid dashboard mockups and SaaS product language.';
+  if (nature === 'civic') return 'Use civic public-service layouts: urgent-action panels, prevention guidance, community proof, volunteer routes, and calm authority. Avoid course/student language unless the prompt is truly an education provider.';
   if (nature === 'commerce') return 'Use product-first retail layouts with product imagery, categories, sale logic, trust notes, and clear purchase/enquiry paths.';
   return `Use ${nature}-specific sections, imagery, and conversion flow.`;
 }
@@ -803,8 +943,22 @@ function sectionsForNaturePage(nature, title) {
   if (nature === 'property') return ['Search or listings', 'Area proof', 'Valuation CTA', 'Viewing CTA'];
   if (nature === 'event') return ['Schedule', 'Speakers or venue', 'Ticket CTA', 'FAQ'];
   if (nature === 'education') return ['Course overview', 'Outcomes', 'Tutor proof', 'Admissions CTA'];
+  if (nature === 'civic') {
+    if (/emergency/.test(lower)) return ['Urgent route panel', 'When to call', 'What details help', 'Non-urgent options', 'Safety FAQ'];
+    if (/safety/.test(lower)) return ['Prevention checklist', 'Home and business advice', 'Visit request route', 'Useful FAQs', 'Contact CTA'];
+    if (/community/.test(lower)) return ['Programme overview', 'Audience groups', 'Visit request', 'Local proof', 'Community FAQ'];
+    if (/volunteer/.test(lower)) return ['Volunteer routes', 'What to include', 'Expectations', 'Enquiry CTA'];
+    if (/contact/.test(lower)) return ['Urgency selector', 'Short enquiry form', 'Location details', 'What happens next'];
+    return ['Public safety hero', 'Emergency routes', 'Safety services', 'Community proof', 'FAQ', 'Contact CTA'];
+  }
   if (nature === 'fitness') return ['Classes', 'Memberships', 'Timetable', 'Trial CTA'];
-  if (nature === 'care') return ['Treatment path', 'Practitioner trust', 'Patient FAQ', 'Booking CTA'];
+  if (nature === 'care') {
+    if (/treatment/.test(lower)) return ['Treatment chooser', 'Who each route helps', 'First appointment flow', 'Recovery proof', 'Treatment FAQ', 'Booking CTA'];
+    if (/practitioner/.test(lower)) return ['Clinician introduction', 'Profiles and focus areas', 'Team standard', 'Credentials', 'Ask the team'];
+    if (/patient/.test(lower)) return ['Before you visit', 'What to bring', 'Appointment timeline', 'Aftercare expectations', 'Patient FAQ'];
+    if (/contact/.test(lower)) return ['Contact options', 'Short enquiry form', 'Clinic details', 'What happens next', 'Map'];
+    return ['Clinic hero', 'Treatment overview', 'Process', 'Proof', 'Patient FAQ', 'Booking CTA'];
+  }
   return ['Overview', 'Proof', 'Details', 'CTA'];
 }
 
@@ -816,14 +970,15 @@ function chooseTemplateProfile(site) {
   if (/corporate|multi[-\s]?page|multiple pages|full website|company website/.test(prompt)) return { mode: 'corporate', label: 'Corporate multi-page site' };
   if (/campaign|launch|sale|offer|promotion/.test(prompt) && nature === 'commerce') return { mode: 'campaign', label: 'Campaign landing site' };
   const pools = {
-    commerce: [{ mode: 'catalogue', label: 'Catalogue site' }, { mode: 'campaign', label: 'Campaign landing site' }, { mode: 'onePage', label: 'One-page retail site' }, { mode: 'corporate', label: 'Retail website' }],
-    hospitality: [{ mode: 'booking', label: 'Booking-first site' }, { mode: 'onePage', label: 'One-page restaurant site' }, { mode: 'editorial', label: 'Atmospheric venue site' }],
-    professional: [{ mode: 'corporate', label: 'Corporate multi-page site' }, { mode: 'onePage', label: 'One-page advisory site' }, { mode: 'editorial', label: 'Authority editorial site' }],
-    education: [{ mode: 'onePage', label: 'One-page tutoring site' }, { mode: 'corporate', label: 'Education website' }, { mode: 'editorial', label: 'Outcome-led learning site' }],
-    portfolio: [{ mode: 'portfolio', label: 'Portfolio site' }, { mode: 'onePage', label: 'One-page portfolio' }, { mode: 'editorial', label: 'Editorial studio site' }],
-    software: [{ mode: 'corporate', label: 'SaaS website' }, { mode: 'onePage', label: 'Product landing page' }, { mode: 'campaign', label: 'Demo campaign site' }],
-    care: [{ mode: 'corporate', label: 'Clinic website' }, { mode: 'onePage', label: 'One-page clinic site' }, { mode: 'booking', label: 'Booking-first clinic site' }],
-    service: [{ mode: 'onePage', label: 'One-page local service site' }, { mode: 'corporate', label: 'Local business website' }, { mode: 'editorial', label: 'Proof-led service site' }]
+    commerce: [{ mode: 'catalogue', label: 'Catalogue site' }, { mode: 'campaign', label: 'Campaign landing site' }, { mode: 'corporate', label: 'Retail website' }],
+    hospitality: [{ mode: 'booking', label: 'Booking-first site' }, { mode: 'editorial', label: 'Atmospheric venue site' }, { mode: 'corporate', label: 'Hospitality website' }],
+    professional: [{ mode: 'corporate', label: 'Corporate multi-page site' }, { mode: 'editorial', label: 'Authority editorial site' }, { mode: 'briefing', label: 'Briefing-led advisory site' }],
+    education: [{ mode: 'corporate', label: 'Education website' }, { mode: 'editorial', label: 'Outcome-led learning site' }, { mode: 'admissions', label: 'Admissions-focused education site' }],
+    civic: [{ mode: 'corporate', label: 'Public safety website' }, { mode: 'editorial', label: 'Safety advice hub' }, { mode: 'briefing', label: 'Emergency information site' }],
+    portfolio: [{ mode: 'portfolio', label: 'Portfolio site' }, { mode: 'editorial', label: 'Editorial studio site' }, { mode: 'corporate', label: 'Studio website' }],
+    software: [{ mode: 'corporate', label: 'SaaS website' }, { mode: 'campaign', label: 'Demo campaign site' }, { mode: 'editorial', label: 'Product education site' }],
+    care: [{ mode: 'corporate', label: 'Clinic website' }, { mode: 'booking', label: 'Booking-first clinic site' }, { mode: 'editorial', label: 'Patient education clinic site' }],
+    service: [{ mode: 'corporate', label: 'Local business website' }, { mode: 'editorial', label: 'Proof-led service site' }, { mode: 'briefing', label: 'Service briefing site' }]
   };
   const choices = pools[nature] || pools.service;
   return choices[seed % choices.length];
@@ -852,16 +1007,17 @@ function singlePageServiceHeadline(site) {
   if (nature === 'commerce') return 'Products, offers, and buying confidence in one place.';
   if (nature === 'hospitality') return 'Menu highlights and booking details without making guests search.';
   if (nature === 'education') return 'Learning routes built around student confidence and parent clarity.';
+  if (nature === 'civic') return 'Emergency help, safety advice, and community routes without confusion.';
   if (nature === 'professional') return 'Specialist routes for serious decisions.';
   return 'The essential offer, proof, and next step on one page.';
 }
 
 function singlePageServiceLabel(nature) {
-  return { commerce: 'product', hospitality: 'menu', education: 'course', professional: 'route', software: 'feature' }[nature] || 'service';
+  return { commerce: 'product', hospitality: 'menu', education: 'course', civic: 'safety route', professional: 'route', software: 'feature' }[nature] || 'service';
 }
 
 function singlePageProcessEyebrow(nature) {
-  return { commerce: 'Buying path', hospitality: 'Booking path', education: 'Learning path', professional: 'Decision path', software: 'Workflow' }[nature] || 'How it works';
+  return { commerce: 'Buying path', hospitality: 'Booking path', education: 'Learning path', civic: 'Safety path', professional: 'Decision path', software: 'Workflow' }[nature] || 'How it works';
 }
 
 function singlePageProcessHeadline(site) {
@@ -869,6 +1025,7 @@ function singlePageProcessHeadline(site) {
   if (nature === 'commerce') return 'From browsing to choosing without friction.';
   if (nature === 'hospitality') return 'From appetite to reservation in a few clear steps.';
   if (nature === 'education') return 'From uncertainty to a focused learning plan.';
+  if (nature === 'civic') return 'From urgent question to the right safety route.';
   if (nature === 'professional') return 'From pressure to a controlled next step.';
   return `A simple route to working with ${site.brief.businessName}.`;
 }
@@ -916,7 +1073,7 @@ function page(site, title, main, description, extraSchema = '') {
   const pagePath = title === 'Home' ? '' : `${slugify(title, { lower: true, strict: true })}.html`;
   const metaDescription = seoMetaDescription(site, title, description);
   const metaKeywords = keywordListForPage(site, title).slice(0, 10).join(', ');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | ${esc(b.businessName)}</title><meta name="description" content="${esc(metaDescription)}"><meta name="keywords" content="${esc(metaKeywords)}"><link rel="canonical" href="https://${esc(site.domain)}/${pagePath}"><meta property="og:title" content="${esc(title)} | ${esc(b.businessName)}"><meta property="og:description" content="${esc(metaDescription)}"><meta property="og:type" content="website"><meta property="og:url" content="https://${esc(site.domain)}/${pagePath}"><meta name="twitter:card" content="summary_large_image"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(site.tokens.fonts.display)}:wght@500;700&family=${encodeURIComponent(site.tokens.fonts.body)}:wght@400;500;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="assets/css/styles.css"><script type="application/ld+json">${schema}</script>${extraSchema}</head><body class="design-v${site.designVariant} mood-${visualMood(site)}"><div class="scroll-progress" data-scroll-progress></div>${layoutNav(site)}<main>${main}</main>${footer(site, title)}<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script><script src="assets/js/app.js" defer></script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} | ${esc(b.businessName)}</title><meta name="description" content="${esc(metaDescription)}"><meta name="keywords" content="${esc(metaKeywords)}"><link rel="canonical" href="https://${esc(site.domain)}/${pagePath}"><meta property="og:title" content="${esc(title)} | ${esc(b.businessName)}"><meta property="og:description" content="${esc(metaDescription)}"><meta property="og:type" content="website"><meta property="og:url" content="https://${esc(site.domain)}/${pagePath}"><meta name="twitter:card" content="summary_large_image"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(site.tokens.fonts.display)}:wght@500;700;800&family=${encodeURIComponent(site.tokens.fonts.body)}:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="assets/css/styles.css"><script type="application/ld+json">${schema}</script>${extraSchema}</head><body class="design-v${site.designVariant} mood-${visualMood(site)} nature-${projectNature(site)}"><div class="scroll-progress" data-scroll-progress></div>${layoutNav(site)}<main>${main}</main>${footer(site, title)}<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script><script src="assets/js/app.js" defer></script></body></html>`;
 }
 function home(site) {
   const { brief: b, content: c } = site;
@@ -1026,6 +1183,7 @@ function footerServiceTitle(site) {
   const nature = projectNature(site);
   if (nature === 'commerce') return 'Products';
   if (nature === 'education') return 'Learning';
+  if (nature === 'civic') return 'Safety routes';
   if (nature === 'hospitality') return 'Menu';
   if (nature === 'software') return 'Features';
   return 'Services';
@@ -1036,6 +1194,7 @@ function footerProductHeadline(site) {
   if (nature === 'commerce') return 'Featured products and sale routes';
   if (nature === 'software') return 'Product areas that move visitors toward a demo';
   if (nature === 'education') return 'Learning routes visitors can understand quickly';
+  if (nature === 'civic') return 'Emergency, prevention, and community routes';
   return `Focused offers from ${site.brief.businessName}`;
 }
 
@@ -1051,6 +1210,7 @@ function contextualFooterCopy(site, pageTitle = 'Home') {
     hospitality: 'Footer content keeps booking, opening times, location, and menu confidence close to the final scroll.',
     care: 'Footer content gives cautious visitors reassurance, contact details, official information, and one calm next step.',
     education: 'Footer content helps families compare learning options, contact the team, and keep useful guidance close.',
+    civic: 'Footer content keeps emergency guidance, safety advice, community routes, contact details, and legal links close.',
     software: 'Footer content keeps product proof, demo intent, support, and company information easy to scan.'
   };
   return map[nature] || site.content.localProof || site.content.microcopy.contactHint;
@@ -1077,6 +1237,14 @@ function imageUrl(site, purpose, w = 1200, h = 900) {
       'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5',
       'https://images.unsplash.com/photo-1606811971618-4486d14f3f99',
       'https://images.unsplash.com/photo-1576091160550-2173dba999ef'
+    ],
+    physiotherapy: [
+      'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b',
+      'https://images.unsplash.com/photo-1599058917212-d750089bc07e',
+      'https://images.unsplash.com/photo-1518611012118-696072aa579a',
+      'https://images.unsplash.com/photo-1559757148-5c350d0d3c56',
+      'https://images.unsplash.com/photo-1629909613654-28e377c37b09',
+      'https://images.unsplash.com/photo-1584467735871-8e85353a8413'
     ],
     professional: [
       'https://images.unsplash.com/photo-1497366754035-f200968a6e72',
@@ -1122,6 +1290,12 @@ function imageUrl(site, purpose, w = 1200, h = 900) {
       'https://images.unsplash.com/photo-1523240795612-9a054b0db644',
       'https://images.unsplash.com/photo-1516321318423-f06f85e504b3'
     ],
+    civic: [
+      'https://images.unsplash.com/photo-1605106702734-205df224ecce',
+      'https://images.unsplash.com/photo-1581094794329-c8112a89af12',
+      'https://images.unsplash.com/photo-1581093458791-9d15482442f6',
+      'https://images.unsplash.com/photo-1517048676732-d65bc937f952'
+    ],
     service: [
       'https://images.unsplash.com/photo-1497366754035-f200968a6e72',
       'https://images.unsplash.com/photo-1521737604893-d14cc237f11d',
@@ -1130,7 +1304,10 @@ function imageUrl(site, purpose, w = 1200, h = 900) {
     ]
   };
   const purposeText = `${purpose || ''} ${site.brief.industry || ''} ${site.blueprint?.businessType || ''}`.toLowerCase();
-  const detectedNature = /software|technology|digital|app|platform|web|saas|it/.test(purposeText) ? 'software' : projectNature(site);
+  const detectedNature = /\b(physio|physiotherapy|rehab|rehabilitation|movement|sports injury)\b/.test(purposeText)
+    ? 'physiotherapy'
+    : /\b(fire|emergency|rescue|public safety|community safety|civic)\b/.test(purposeText) ? 'civic'
+    : /\b(software|technology|digital|app|platform|web|saas|it services|information technology)\b/.test(purposeText) ? 'software' : projectNature(site);
   const library = libraries[detectedNature] || libraries.service;
   const direction = site.content.imageDirection?.[purpose] || '';
   const seedBase = `${site.generationSeed}-${site.brief.businessName}-${purpose}-${direction}`;
@@ -1223,12 +1400,14 @@ function trustPills(site) {
   const blocked = {
     professional: /treatment|patient|home guidance|referral|clinic|appointment|pain|rehab|therapy/i,
     education: /insolvency|director|creditor|restructuring|patient|treatment/i,
+    civic: /student|tutor|gcse|course|admissions|pricing|demo|software/i,
     commerce: /insolvency|director|creditor|treatment|patient|consultation plan/i
   }[nature] || /lorem|placeholder/i;
   const defaults = {
     professional: [`${site.brief.location}-based specialists`, 'Confidential first conversation', 'Clear options before commitment', 'Senior-led advice'],
     commerce: ['Easy product enquiries', 'Clear sizing and availability', 'Fast customer support', 'Secure checkout ready'],
     education: [`${site.brief.location}-based learning support`, 'Clear progress plan', 'Flexible lesson routes', 'Parent-friendly updates'],
+    civic: [`${site.brief.location}-based safety team`, 'Emergency routes separated', 'Community prevention support', 'Volunteer enquiries welcome'],
     care: ['Clear treatment plans', 'Evidence-led decisions', 'Private appointments', 'Practical aftercare'],
     hospitality: ['Simple booking route', 'Local favourite', 'Fresh seasonal choices', 'Private event enquiries'],
     software: ['Fast onboarding', 'Secure workflow', 'Demo-ready product', 'Scalable support'],
@@ -1249,6 +1428,11 @@ function pageIntent(pageItem) {
   const text = `${title} ${pageItem.purpose || ''} ${(pageItem.sections || []).join(' ')} ${pageItem.conversionTarget || ''}`.toLowerCase();
   if (/home|landing|welcome/.test(title)) return 'home';
   if (/contact|enquiry|booking|visit|map|location/.test(title)) return 'contact';
+  if (/treatment|therapy|clinic service|patient information|patient info|before you visit|aftercare|practitioner|clinician|therapist/.test(title)) {
+    if (/practitioner|clinician|therapist/.test(title)) return 'people';
+    if (/patient|aftercare|before you visit/.test(title)) return 'guide';
+    return 'services';
+  }
   if (/sale|offer|discount|deal|clearance/.test(title)) return 'campaign';
   if (/arrival|lookbook|gallery|portfolio|new/.test(title)) return 'lookbook';
   if (/shop|catalog|product|collection|store|browse/.test(title)) return 'catalog';
@@ -1257,6 +1441,9 @@ function pageIntent(pageItem) {
   if (/team|people|staff|expert/.test(title)) return 'people';
   if (/blog|journal|article|insight|news/.test(title)) return 'journal';
   if (/contact|enquiry|booking|visit|map|location/.test(text)) return 'contact';
+  if (/treatment|therapy|clinic service/.test(text)) return 'services';
+  if (/patient information|patient info|aftercare|before you visit/.test(text)) return 'guide';
+  if (/practitioner|clinician|therapist/.test(text)) return 'people';
   if (/sale|offer|discount|deal|clearance/.test(text)) return 'campaign';
   if (/arrival|lookbook|gallery|portfolio|new stock/.test(text)) return 'lookbook';
   if (/shop|catalog|product|collection|store|browse/.test(text)) return 'catalog';
@@ -1311,14 +1498,14 @@ function pageSectionItems(pageItem) {
 }
 
 function goalCopy(site, pageItem, section) {
-  const goal = pageItem.conversionTarget || pageItem.purpose || site.blueprint?.primaryGoal || site.content.microcopy.contactHint;
-  return `${section} is shaped around one job: ${goal}. The layout keeps the visitor moving with context, proof, and a clear action.`;
+  return sectionCopy(site, section, pageItem);
 }
 
 function projectNature(site) {
   const declared = String(site.blueprint?.projectNature || '').toLowerCase();
-  if (['commerce', 'hospitality', 'care', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'service'].includes(declared)) return declared;
+  if (['commerce', 'hospitality', 'care', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'civic', 'service'].includes(declared)) return declared;
   const text = `${site.brief.industry || ''} ${site.blueprint?.businessType || ''} ${site.blueprint?.primaryGoal || ''} ${site.metadata?.prompt || ''}`.toLowerCase();
+  if (/fire station|fire brigade|fire service|fire safety|emergency service|emergency response|ambulance|rescue|public safety|community safety|council|charity|nonprofit|non-profit|volunteer service/.test(text)) return 'civic';
   if (/tutor|tuition|teacher|student|school|course|education|academy|learning|lesson|gcse|a-level|maths|english|exam|revision|private tutor|online tutoring/.test(text)) return 'education';
   if (/insolvency|restructuring|business advisory|financial distress|advisory|accountant|accounting|consultant|consulting|finance|solicitor|law|legal|professional/.test(text)) return 'professional';
   if (/shoe|shop|retail|e-?commerce|store|product|fashion|clothing|jewellery|jewelry/.test(text)) return 'commerce';
@@ -1332,6 +1519,75 @@ function projectNature(site) {
   return 'service';
 }
 
+function applyQualityFloor(site) {
+  const nature = projectNature(site);
+  const c = site.content;
+  c.researchBrief = c.researchBrief || {};
+  c.layoutGuidance = c.layoutGuidance || {};
+  c.researchBrief.marketContext ||= `${site.brief.industry} visitors compare trust, clarity, local relevance, proof, and the effort required to take the next step.`;
+  c.researchBrief.visitorObjections = uniqueList(c.researchBrief.visitorObjections || ['Can I trust this business?', 'Is this the right fit?', 'What happens after I make contact?']).slice(0, 6);
+  c.researchBrief.proofRequired = uniqueList(c.researchBrief.proofRequired || ['Clear services', 'Specific process', 'Testimonials', 'FAQs', `${site.brief.location} relevance`]).slice(0, 6);
+  c.researchBrief.localSeoAngle ||= `Connect ${site.brief.industry} search intent with ${site.brief.location} proof, service detail, FAQs, and a clear contact route.`;
+  c.researchBrief.contentGaps = uniqueList(c.researchBrief.contentGaps || ['Supply exact prices, opening hours, credentials, named case studies, and real customer quotes where relevant.']).slice(0, 6);
+  c.layoutGuidance.header ||= 'Use a visible sticky header with brand, navigation, and one primary action on desktop and mobile.';
+  c.layoutGuidance.hero ||= 'First viewport must include a specific value proposition, trust signal, CTA, and relevant visual or proof panel.';
+  c.layoutGuidance.sectionRhythm ||= 'Alternate service, proof, process, FAQ, image, and CTA sections with consistent spacing and constrained text widths.';
+  c.layoutGuidance.mobile ||= 'Stack grids cleanly, preserve tap targets, keep navigation visible, and prevent horizontal overflow.';
+  c.layoutGuidance.ctaPlacement ||= 'Place the main action above the fold, after proof, and in the final CTA.';
+
+  if (!Array.isArray(site.blueprint?.pages)) return;
+  site.blueprint.pages = site.blueprint.pages.map((pageItem) => {
+    const title = String(pageItem.title || '').toLowerCase();
+    if (/privacy/.test(title)) return pageItem;
+    const sections = pageSectionItems(pageItem).filter((section) => !/^content$/i.test(section));
+    const minimum = /home|services|product|shop|treatments|courses|classes|work|case/.test(title) ? 6 : 4;
+    const added = qualitySectionsForPage(site, pageItem, nature);
+    return {
+      ...pageItem,
+      sections: uniqueList([...sections, ...added]).slice(0, Math.max(minimum, Math.min(8, sections.length + added.length))),
+      purpose: cleanPagePurpose(site, pageItem, purposeForQualityFloor(site, pageItem)),
+      conversionTarget: pageItem.conversionTarget || conversionForQualityFloor(site, pageItem, nature)
+    };
+  });
+}
+
+function qualitySectionsForPage(site, pageItem, nature) {
+  const title = `${pageItem.title || ''} ${pageItem.slug || ''}`.toLowerCase();
+  if (nature === 'civic') {
+    if (/home/.test(title)) return ['Emergency routes', 'Prevention advice', 'Community support', 'Volunteer route', 'Proof and FAQs', 'Contact CTA'];
+    if (/emergency/.test(title)) return ['Urgent action', 'When to call', 'What details help', 'Non-urgent route', 'Safety FAQ'];
+    if (/safety|community|volunteer/.test(title)) return ['Public guidance', 'Who it helps', 'What to send', 'Local proof', 'Next step'];
+  }
+  if (/home/.test(title)) return ['Value proposition', 'Trust signals', nature === 'commerce' ? 'Featured products' : 'Services overview', 'How it works', 'Proof and testimonials', 'FAQ', 'Final CTA'];
+  if (/contact|enquiry|booking|visit|map|location/.test(title)) return ['Contact options', 'Short form', 'What happens next', 'Location details', 'Reassurance'];
+  if (/service|solution|treatment|product|shop|course|class/.test(title)) return ['Decision guide', 'Detailed options', 'Process', 'Proof', 'FAQs', 'Next step'];
+  if (/about|story|mission|values/.test(title)) return ['Origin story', 'Values', 'Local proof', 'Why it matters', 'Next step'];
+  if (/team|people|practitioner|trainer|speaker/.test(title)) return ['People overview', 'Profiles', 'Credentials', 'How visitors choose', 'Ask the team'];
+  if (/case|work|portfolio|gallery/.test(title)) return ['Featured proof', 'Project examples', 'Method', 'Results', 'Start a project'];
+  if (/blog|journal|resource|guide|faq|help/.test(title)) return ['Featured guide', 'Common questions', 'Practical advice', 'Related services', 'Next step'];
+  return ['Overview', 'Visitor question', 'Useful proof', 'Action guidance'];
+}
+
+function purposeForQualityFloor(site, pageItem) {
+  const title = String(pageItem.title || '').toLowerCase();
+  if (/home/.test(title)) return `Show who ${site.brief.businessName} helps, why it is credible, and what visitors should do next.`;
+  if (/contact|enquiry|booking/.test(title)) return `Make it easy to contact ${site.brief.businessName}, understand what to send, and feel reassured before submitting.`;
+  if (/service|solution|treatment|product|shop|course|class/.test(title)) return `Help visitors compare the main options, understand the process, and choose a sensible next step.`;
+  if (/about|story|mission|values/.test(title)) return `Build trust by explaining the business story, standards, and local relevance without filler.`;
+  return `Answer the visitor's main question on this page and move them toward a clear next action.`;
+}
+
+function conversionForQualityFloor(site, pageItem, nature) {
+  const title = String(pageItem.title || '').toLowerCase();
+  if (/contact|enquiry|booking/.test(title)) return 'Send a qualified enquiry';
+  if (nature === 'commerce' && /shop|sale|arrival|product/.test(title)) return 'Check product availability or make a purchase enquiry';
+  if (nature === 'hospitality') return 'Reserve or plan a visit';
+  if (nature === 'software') return 'Request a demo';
+  if (nature === 'education') return 'Ask about the right learning route';
+  if (nature === 'civic') return 'Find safety guidance or contact the right team';
+  return site.content.hero?.primaryCta || site.blueprint?.primaryGoal || 'Start a focused enquiry';
+}
+
 function visualMood(site) {
   return ['ink', 'paper', 'contrast', 'soft'][site.designVariant % 4];
 }
@@ -1343,6 +1599,10 @@ function alternateHref(site, fallback = 'contact.html') {
 
 function dynamicCustomerPage(site, pageItem, index = 0) {
   if (pageIntent(pageItem) === 'home') return withHomeDepth(site, natureHome(site, pageItem));
+  if (projectNature(site) === 'care') {
+    const carePage = renderCarePage(site, pageItem);
+    if (carePage) return carePage;
+  }
   const layout = pageItem.__layout || layoutPoolFor(pageIntent(pageItem))[index % layoutPoolFor(pageIntent(pageItem)).length];
   const renderers = {
     heroSplit: dynamicHomeSplit,
@@ -1383,6 +1643,14 @@ function dynamicCustomerPage(site, pageItem, index = 0) {
   return (renderers[layout] || blueprintGenericPage)(site, pageItem, index);
 }
 
+function renderCarePage(site, pageItem) {
+  const title = `${pageItem.title || ''} ${pageItem.slug || ''}`.toLowerCase();
+  if (/treatment|service|therapy/.test(title)) return careTreatmentsPage(site, pageItem);
+  if (/practitioner|clinician|therapist|team/.test(title)) return carePractitionersPage(site, pageItem);
+  if (/patient|before|aftercare|information|faq|support/.test(title)) return carePatientInfoPage(site, pageItem);
+  return '';
+}
+
 function withHomeDepth(site, heroMarkup) {
   const modules = homeDepthPlan(site).map((module) => homeDepthModule(site, module)).filter(Boolean).join('');
   return `${heroMarkup}${modules}`;
@@ -1391,19 +1659,22 @@ function withHomeDepth(site, heroMarkup) {
 function homeDepthPlan(site) {
   const nature = projectNature(site);
   const plans = {
-    commerce: ['services', 'proof', 'benefits', 'keywords', 'cta'],
-    hospitality: ['image', 'services', 'proof', 'faq', 'cta'],
-    care: ['benefits', 'image', 'services', 'faq', 'proof', 'cta'],
-    professional: ['benefits', 'services', 'proof', 'faq', 'cta'],
-    fitness: ['services', 'proof', 'image', 'benefits', 'cta'],
-    portfolio: ['image', 'proof', 'benefits', 'cta'],
-    software: ['benefits', 'proof', 'services', 'faq', 'cta'],
-    property: ['image', 'services', 'proof', 'benefits', 'cta'],
-    event: ['services', 'image', 'proof', 'faq', 'cta'],
-    education: ['image', 'services', 'benefits', 'proof', 'faq', 'cta'],
-    service: ['image', 'benefits', 'services', 'proof', 'faq', 'cta']
+    commerce: [['services', 'proof', 'benefits', 'keywords', 'cta'], ['image', 'services', 'proof', 'cta'], ['benefits', 'services', 'faq', 'proof', 'cta']],
+    hospitality: [['image', 'services', 'proof', 'faq', 'cta'], ['services', 'image', 'benefits', 'proof', 'cta'], ['proof', 'services', 'faq', 'cta']],
+    care: [['benefits', 'image', 'services', 'faq', 'proof', 'cta'], ['services', 'benefits', 'proof', 'faq', 'cta'], ['image', 'faq', 'services', 'proof', 'cta']],
+    professional: [['benefits', 'services', 'proof', 'faq', 'cta'], ['services', 'proof', 'benefits', 'cta'], ['benefits', 'faq', 'services', 'proof', 'cta']],
+    fitness: [['services', 'proof', 'image', 'benefits', 'cta'], ['image', 'services', 'proof', 'cta'], ['benefits', 'services', 'faq', 'cta']],
+    portfolio: [['image', 'proof', 'benefits', 'cta'], ['proof', 'image', 'cta'], ['benefits', 'image', 'proof', 'cta']],
+    software: [['benefits', 'proof', 'services', 'faq', 'cta'], ['services', 'benefits', 'proof', 'cta'], ['proof', 'services', 'faq', 'cta']],
+    property: [['image', 'services', 'proof', 'benefits', 'cta'], ['services', 'image', 'proof', 'cta'], ['benefits', 'services', 'faq', 'cta']],
+    event: [['services', 'image', 'proof', 'faq', 'cta'], ['image', 'services', 'proof', 'cta'], ['proof', 'services', 'faq', 'cta']],
+    education: [['image', 'services', 'benefits', 'proof', 'faq', 'cta'], ['services', 'proof', 'benefits', 'cta'], ['benefits', 'services', 'faq', 'proof', 'cta']],
+    civic: [['benefits', 'services', 'faq', 'proof', 'cta'], ['services', 'image', 'benefits', 'proof', 'cta'], ['faq', 'services', 'proof', 'cta']],
+    service: [['image', 'benefits', 'services', 'proof', 'faq', 'cta'], ['benefits', 'services', 'proof', 'cta'], ['services', 'image', 'faq', 'cta']]
   };
-  const base = [...(plans[nature] || plans.service)];
+  const options = plans[nature] || plans.service;
+  const selected = options[hashNumber(`${site.generationSeed}-${site.brief.businessName}-${site.blueprint?.visualStrategy || ''}`) % options.length];
+  const base = [...selected];
   const first = base.shift();
   const last = base.pop();
   const rotation = site.designVariant % Math.max(base.length, 1);
@@ -1443,6 +1714,7 @@ function homeBenefitDepth(site) {
     care: 'Why patients feel confident',
     professional: `Why choose ${site.brief.businessName}`,
     education: 'Why families enquire',
+    civic: 'Why residents trust it',
     software: 'Why teams request a demo',
     property: 'Why sellers and buyers keep reading',
     event: 'Why attendees commit',
@@ -1462,6 +1734,7 @@ function homeServiceDepth(site) {
     care: 'Treatments and reassurance visitors can compare.',
     professional: 'Clear routes for high-trust decisions.',
     education: 'Learning options, outcomes, and enquiry routes.',
+    civic: 'Emergency help, prevention advice, and community support routes.',
     software: 'Product workflows and practical use cases.',
     property: 'Property services, local intent, and next steps.',
     event: 'Programme, tickets, and attendance decisions.',
@@ -1523,7 +1796,7 @@ function natureHome(site, pageItem) {
   const pools = {
     commerce: [commerceHome, dynamicHomeProductWall, dynamicHomeShowcase, dynamicHomeMagazine],
     hospitality: [hospitalityHome, hospitalityBookingHome, dynamicHomeMagazine],
-    care: [careHome, careTrustHome, dynamicHomeEditorial],
+    care: [careClinicHome],
     professional: [professionalHome, professionalBriefingHome, professionalAuthorityHome],
     fitness: [fitnessHome, dynamicHomePoster, dynamicHomeShowcase],
     portfolio: [portfolioHome, dynamicHomeMagazine, dynamicHomePoster],
@@ -1531,6 +1804,7 @@ function natureHome(site, pageItem) {
     property: [propertyHome, dynamicHomeShowcase, dynamicHomeEditorial],
     event: [eventHome, dynamicHomePoster, dynamicHomeMagazine],
     education: [educationHome, educationOutcomeHome, dynamicHomeEditorial],
+    civic: [civicHome, civicResponseHome, civicSafetyHome],
     service: [serviceHome, localServiceHome, dynamicHomeShowcase]
   };
   const choices = pools[nature] || pools.service;
@@ -1566,12 +1840,54 @@ function careHome(site, pageItem) {
   <section class="service-showcase">${site.content.services.slice(0, 4).map((s, i) => `<article class="service-row reveal"><div><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(s.title)}</h2><p>${esc(s.description)}</p></div><ul>${(s.bullets || []).map((b) => `<li>${esc(b)}</li>`).join('')}</ul></article>`).join('')}</section>`;
 }
 
+function careClinicHome(site, pageItem) {
+  return `<section class="care-clinic-hero" data-parallax>
+    <div class="care-hero-copy reveal"><p class="eyebrow">${esc(site.brief.location)} ${esc(site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div><div class="hero-actions"><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book an appointment')}</a><a class="text-link" href="${alternateHref(site, 'treatments.html')}">View treatments</a></div></div>
+    <figure class="care-hero-visual reveal"><img src="${imageUrl(site, `physiotherapy clinic assessment movement ${site.generationSeed}`, 1280, 980)}" alt="${esc(site.brief.businessName)} physiotherapy assessment"><figcaption>${esc(site.content.microcopy.bookingReassurance)}</figcaption></figure>
+    <aside class="care-hero-panel reveal"><h2>First visit focus</h2>${site.content.processSteps.slice(0, 3).map((step) => `<p><strong>${esc(step.title)}</strong><span>${esc(step.text)}</span></p>`).join('')}</aside>
+  </section>
+  <section class="care-service-overview"><div class="section-heading reveal"><p class="eyebrow">Treatment routes</p><h2>Clear options without the clinical guesswork.</h2><p>${esc(site.content.localProof)}</p></div><div class="care-soft-grid">${site.content.services.slice(0, 5).map((service, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(service.title)}</h3><p>${esc(service.description)}</p></article>`).join('')}</div></section>
+  <section class="care-proof-band"><div class="stats-depth">${site.content.stats.slice(0, 3).map((stat) => `<article class="reveal"><strong data-count="${stat.value}">0</strong><span>${esc(stat.label)}</span></article>`).join('')}</div><div class="testimonial-rail">${site.content.testimonials.slice(0, 3).map((testimonial) => `<blockquote class="reveal"><p>"${esc(testimonial.quote)}"</p><cite>${esc(testimonial.name)}${testimonial.context ? ` / ${esc(testimonial.context)}` : ''}</cite></blockquote>`).join('')}</div></section>`;
+}
+
 function careTrustHome(site, pageItem) {
   return `<section class="care-trust-home">
     <div class="reveal"><p class="eyebrow">Reassurance first</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div></div>
     <figure class="reveal"><img src="${imageUrl(site, `calm healthcare consultation ${site.generationSeed}`, 1100, 850)}" alt="${esc(site.brief.businessName)} consultation"></figure>
     <aside class="care-trust-panel reveal"><h2>Before you book</h2>${site.content.faqs.slice(0, 3).map((faq) => `<details open><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}<a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book an appointment')}</a></aside>
   </section>`;
+}
+
+function careTreatmentsPage(site, pageItem) {
+  const first = site.content.services[0];
+  return `<section class="care-page-hero care-treatment-hero" data-parallax>
+    <div class="reveal"><p class="eyebrow">Treatments</p><h1>Treatment routes that feel clear before you book.</h1><p class="lede">${esc(cleanPagePurpose(site, pageItem, site.content.microcopy.bookingReassurance))}</p><div class="trust-pills">${trustPills(site)}</div></div>
+    <figure class="reveal"><img src="${imageUrl(site, `physiotherapy treatment room movement assessment ${site.generationSeed}`, 1120, 900)}" alt="${esc(site.brief.businessName)} treatment room"><figcaption>${esc(first?.outcome || site.content.localProof)}</figcaption></figure>
+  </section>
+  <section class="care-treatment-grid">${site.content.services.map((service, i) => `<article class="care-treatment-card reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(service.title)}</h2><p>${esc(service.description)}</p><ul>${(service.bullets || []).slice(0, 3).map((bullet) => `<li>${esc(bullet)}</li>`).join('')}</ul><a class="text-link" href="contact.html">Ask about ${esc(service.title)}</a></article>`).join('')}</section>
+  <section class="care-method-panel"><div class="section-heading reveal"><p class="eyebrow">How treatment is planned</p><h2>No generic package. The first appointment turns symptoms into a usable plan.</h2><p>${esc(site.content.microcopy.bookingReassurance)}</p></div><ol class="care-steps">${site.content.processSteps.slice(0, 4).map((step, i) => `<li class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></li>`).join('')}</ol></section>
+  <section class="care-faq-panel"><div class="section-heading reveal"><p class="eyebrow">Treatment questions</p><h2>Answers before someone commits to an appointment.</h2></div><div class="faq-columns">${site.content.faqs.slice(0, 5).map((faq) => `<details class="reveal"><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}</div></section>`;
+}
+
+function carePractitionersPage(site, pageItem) {
+  return `<section class="care-page-hero care-practitioner-hero">
+    <div class="reveal"><p class="eyebrow">Practitioners</p><h1>Meet the people behind the treatment plan.</h1><p class="lede">${esc(cleanPagePurpose(site, pageItem, 'Visitors should understand who they will meet, how the team works, and why the first appointment feels considered.'))}</p></div>
+    <aside class="care-credential-panel reveal">${site.content.trustSignals.slice(0, 4).map((signal) => `<span>${esc(signal)}</span>`).join('')}</aside>
+  </section>
+  <section class="care-practitioner-list">${site.content.teamMembers.map((member, i) => `<article class="care-practitioner-card reveal"><img src="${imageUrl(site, `physiotherapist portrait clinic ${member.name} ${i}`, 760, 860)}" alt="${esc(member.name)}"><div><p class="eyebrow">${esc(member.role)}</p><h2>${esc(member.name)}</h2><p>${esc(member.bio)}</p><dl><div><dt>Focus</dt><dd>${esc(site.content.services[i % site.content.services.length]?.title || 'Assessment and treatment planning')}</dd></div><div><dt>Good for</dt><dd>${esc(site.content.faqs[i % site.content.faqs.length]?.question || 'People who want clear advice before booking')}</dd></div></dl></div></article>`).join('')}</section>
+  <section class="care-team-method"><div class="section-heading reveal"><p class="eyebrow">Team standard</p><h2>${esc(site.content.brandThesis)}</h2></div><div class="care-soft-grid">${site.content.differentiators.slice(0, 3).map((item) => `<article class="reveal"><h3>${esc(item.title)}</h3><p>${esc(item.text)}</p></article>`).join('')}</div></section>`;
+}
+
+function carePatientInfoPage(site, pageItem) {
+  const preparation = ['What has changed recently?', 'What makes symptoms better or worse?', 'What do you need to get back to?', 'Which questions do you want answered first?'];
+  return `<section class="care-page-hero care-info-hero" data-parallax>
+    <div class="reveal"><p class="eyebrow">Patient information</p><h1>Know what to expect before your first visit.</h1><p class="lede">${esc(cleanPagePurpose(site, pageItem, site.content.microcopy.bookingReassurance))}</p><a class="button" href="contact.html">Ask before booking</a></div>
+    <figure class="reveal"><img src="${imageUrl(site, `physiotherapy patient guidance exercise plan ${site.generationSeed}`, 900, 1080)}" alt="${esc(site.brief.businessName)} patient guidance"><figcaption>${esc(site.content.microcopy.bookingReassurance)}</figcaption></figure>
+    <div class="care-info-card reveal"><h2>Bring the useful details</h2>${preparation.map((item) => `<p>${esc(item)}</p>`).join('')}</div>
+  </section>
+  <section class="care-visit-timeline"><div class="section-heading reveal"><p class="eyebrow">Visit flow</p><h2>From enquiry to a practical plan.</h2></div>${site.content.processSteps.slice(0, 4).map((step, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</section>
+  <section class="care-faq-panel patient-faq"><div class="section-heading reveal"><p class="eyebrow">Before you book</p><h2>Common questions answered plainly.</h2></div><div class="faq-columns">${site.content.faqs.map((faq, i) => `<details class="reveal" ${i < 2 ? 'open' : ''}><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}</div></section>
+  <section class="care-reassurance-strip reveal"><strong>${esc(site.brief.businessName)}</strong><span>${esc(site.content.localProof)}</span><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Book a first conversation')}</a></section>`;
 }
 
 function professionalHome(site, pageItem) {
@@ -1638,6 +1954,22 @@ function buildDesignIntelligence(site) {
       ]
     };
   }
+  if (nature === 'civic') {
+    return {
+      visitorState: 'For residents who need safety information quickly',
+      reassurance: 'Urgent routes, prevention advice, community programmes, and volunteer enquiries are separated so visitors can act without uncertainty.',
+      conversionReason: 'The next action may be contact, advice, reporting, or volunteering, so the page makes each route obvious.',
+      strategyHeadline: 'A public-safety website should reduce hesitation before anything else.',
+      strategyText: 'The layout prioritises urgent guidance, plain-language prevention, local trust signals, and simple enquiry routing instead of decorative sections.',
+      methodHeadline: 'Clear safety routes, local reassurance, and practical prevention.',
+      decisionCards: [
+        { title: 'Separate urgent from routine', text: 'Visitors can distinguish immediate danger from advice, visits, and community support.' },
+        { title: 'Make prevention usable', text: 'Safety advice is framed as checklists, visits, and clear requests rather than abstract education.' },
+        { title: 'Show local trust', text: 'Community proof and service routes make the station feel useful before the contact form appears.' },
+        { title: 'Keep volunteering visible', text: 'Supporters can see what to send and how the team will respond.' }
+      ]
+    };
+  }
   return {
     visitorState: site.blueprint?.audience || 'For the right visitor',
     reassurance: site.content.microcopy?.bookingReassurance || site.content.localProof || 'Clear information before a simple next step.',
@@ -1695,6 +2027,33 @@ function educationOutcomeHome(site, pageItem) {
     <div class="outcome-ladder reveal">${site.content.processSteps.slice(0, 4).map((step, i) => `<article><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</div>
     <figure class="reveal"><img src="${imageUrl(site, `premium tutoring focused study ${site.generationSeed}`, 900, 1100)}" alt="${esc(site.brief.businessName)} learning session"></figure>
   </section>`;
+}
+
+function civicHome(site, pageItem) {
+  const urgent = site.content.services.slice(0, 4);
+  return `<section class="civic-hero">
+    <div class="civic-hero-copy reveal"><p class="eyebrow">${esc(site.content.hero.kicker || site.brief.industry)}</p><h1>${esc(site.content.hero.headline)}</h1><p class="lede">${esc(site.content.hero.subtext)}</p><div class="hero-actions"><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Find the right contact')}</a><a class="text-link" href="${alternateHref(site, 'safety-advice.html')}">${esc(site.content.hero.secondaryCta || 'Read safety advice')}</a></div></div>
+    <div class="civic-action-panel reveal"><h2>Start here</h2>${urgent.map((service, i) => `<a href="${alternateHref(site, 'emergency-help.html')}"><span>${String(i + 1).padStart(2, '0')}</span><strong>${esc(service.title)}</strong><small>${esc((service.bullets || [])[0] || 'Clear public route')}</small></a>`).join('')}</div>
+    <figure class="civic-visual reveal"><img src="${imageUrl(site, `fire station emergency public safety ${site.generationSeed}`, 1100, 900)}" alt="${esc(site.brief.businessName)} public safety team"><figcaption>${esc(site.content.microcopy.bookingReassurance)}</figcaption></figure>
+  </section>
+  <section class="civic-service-grid">${site.content.services.slice(0, 5).map((service, i) => serviceRichCard(site, service, i, 'public route')).join('')}</section>`;
+}
+
+function civicResponseHome(site, pageItem) {
+  return `<section class="civic-response-home">
+    <aside class="reveal"><p class="eyebrow">Public safety</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><div class="trust-pills">${trustPills(site)}</div></aside>
+    <div class="response-board reveal">${site.content.processSteps.slice(0, 4).map((step, i) => `<article><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(step.title)}</h2><p>${esc(step.text)}</p></article>`).join('')}</div>
+    <div class="civic-proof-card reveal"><strong data-count="${site.content.stats[0]?.value || 24}">0</strong><span>${esc(site.content.stats[0]?.label || 'hour response aim')}</span><p>${esc(site.content.localProof)}</p><a class="button" href="contact.html">Contact the team</a></div>
+  </section>
+  <section class="civic-community-strip"><figure class="reveal"><img src="${imageUrl(site, `community fire safety visit ${site.generationSeed}`, 1100, 720)}" alt="${esc(site.brief.businessName)} community safety visit"></figure><div class="reveal"><p class="eyebrow">Community prevention</p><h2>${esc(site.content.brandThesis)}</h2><p>${esc(site.content.microcopy.bookingReassurance)}</p></div></section>`;
+}
+
+function civicSafetyHome(site, pageItem) {
+  return `<section class="civic-safety-home">
+    <div class="reveal"><p class="eyebrow">${esc(site.brief.location)} safety hub</p><h1>${esc(site.content.hero.headline)}</h1><p>${esc(site.content.hero.subtext)}</p><a class="button" href="contact.html">${esc(site.content.hero.primaryCta || 'Find the right contact')}</a></div>
+    <div class="safety-checklist reveal"><h2>Safety routes</h2>${site.content.faqs.slice(0, 4).map((faq) => `<details open><summary>${esc(faq.question)}</summary><p>${esc(faq.answer)}</p></details>`).join('')}</div>
+  </section>
+  <section class="civic-programme-band"><div class="section-heading reveal"><p class="eyebrow">Programmes and prevention</p><h2>${esc(site.content.localProof)}</h2></div><div class="practice-matrix">${site.content.differentiators.slice(0, 4).map((item, i) => `<article class="reveal"><span>${String(i + 1).padStart(2, '0')}</span><h2>${esc(item.title)}</h2><p>${esc(item.text)}</p></article>`).join('')}</div></section>`;
 }
 
 function serviceRichCard(site, service, index, label = 'service') {
@@ -1872,7 +2231,7 @@ function contactHeadline(site) {
 
 function contactEyebrow(site) {
   const nature = projectNature(site);
-  return { professional: 'Confidential enquiry', commerce: 'Customer support', hospitality: 'Bookings and visits', education: 'Tutoring enquiry', care: 'Booking support' }[nature] || 'Contact';
+  return { professional: 'Confidential enquiry', commerce: 'Customer support', hospitality: 'Bookings and visits', education: 'Tutoring enquiry', civic: 'Public safety contact', care: 'Booking support' }[nature] || 'Contact';
 }
 
 function phoneHref(phone) {
@@ -2049,7 +2408,59 @@ function genericBandPage(site, pageItem) {
 }
 
 function sectionCopy(site, section, pageItem) {
-  return `${section} supports the page goal: ${pageItem.conversionTarget || pageItem.purpose || site.blueprint?.primaryGoal || 'help visitors take the next step'}.`;
+  const label = String(section || '').trim();
+  const text = label.toLowerCase();
+  const nature = projectNature(site);
+  const service = matchedService(site, label);
+  const proof = site.content.differentiators[hashNumber(`${label}-${site.brief.businessName}`) % Math.max(site.content.differentiators.length, 1)];
+  const stat = site.content.stats[hashNumber(`${label}-${site.generationSeed}`) % Math.max(site.content.stats.length, 1)];
+  const faq = site.content.faqs[hashNumber(`${label}-${pageItem?.title || ''}`) % Math.max(site.content.faqs.length, 1)];
+  const goal = pageItem?.conversionTarget || site.blueprint?.primaryGoal || site.content.microcopy.contactHint || 'take the next step';
+  if (/hero|value|proposition|overview|visitor question|decision/.test(text)) {
+    return `${site.brief.businessName} should quickly answer the visitor's real question: is this relevant, credible, and easy to act on? This section connects ${site.brief.industry} in ${site.brief.location} with a clear reason to ${goal.toLowerCase()}.`;
+  }
+  if (/service|option|offer|product|course|class|treatment|route/.test(text)) {
+    return service
+      ? `${service.title} is explained in practical terms: ${service.description} The page should show who it is for, what is included, and the outcome visitors can expect before they ask for details.`
+      : `The offer is broken into clear choices so visitors can compare what fits their situation before they ${goal.toLowerCase()}.`;
+  }
+  if (/process|how|method|next|works|guidance/.test(text)) {
+    const steps = site.content.processSteps.slice(0, 3).map((step) => step.title).join(', ');
+    return `Visitors need to know what happens after they act. This section turns the process into a simple path: ${steps || 'first conversation, clear recommendation, next action'}.`;
+  }
+  if (/proof|trust|review|testimonial|result|case|credential|signal/.test(text)) {
+    return stat
+      ? `Proof should appear before hesitation builds. Use ${stat.value} ${stat.label} alongside testimonials and specific trust signals so the claim feels earned, not decorative.`
+      : `${proof?.title || 'Relevant proof'} matters here because visitors need evidence before they commit. ${proof?.text || site.content.localProof}`;
+  }
+  if (/faq|question|objection|concern/.test(text)) {
+    return faq ? `${faq.question} ${faq.answer}` : `Answer the most likely objection directly, then point visitors back to the safest next action.`;
+  }
+  if (/local|map|location|visit|area/.test(text)) {
+    return `${site.content.localProof} Make address, phone, email, map context, and service-area language easy to scan.`;
+  }
+  if (/team|people|profile|practitioner|trainer|speaker/.test(text)) {
+    const people = site.content.teamMembers.slice(0, 2).map((member) => `${member.name}, ${member.role}`).join('; ');
+    return `People pages should reduce uncertainty by showing who visitors will deal with. ${people ? `Lead with ${people}.` : 'Add names, roles, credentials, and short human bios when available.'}`;
+  }
+  if (/price|pricing|package|cost/.test(text)) {
+    return nature === 'commerce'
+      ? 'Show price, sale context, availability, delivery or returns reassurance, and a clear enquiry route without making customers hunt.'
+      : 'If exact pricing is not supplied, explain how pricing or suitability is confirmed and what information the visitor should send.';
+  }
+  if (/cta|action|contact|enquiry|book|reserve|demo/.test(text)) {
+    return `${site.content.microcopy.contactHint} ${site.content.microcopy.bookingReassurance}`;
+  }
+  if (proof) return `${proof.title}: ${proof.text}`;
+  return `${label} should add useful evidence, context, or decision support before asking visitors to ${goal.toLowerCase()}.`;
+}
+
+function matchedService(site, label) {
+  const words = String(label || '').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3);
+  return (site.content.services || []).find((service) => {
+    const haystack = `${service.title || ''} ${service.description || ''}`.toLowerCase();
+    return words.some((word) => haystack.includes(word));
+  }) || site.content.services?.[hashNumber(`${label}-${site.brief.industry}`) % Math.max(site.content.services?.length || 1, 1)];
 }
 
 function retailProductName(title, index) {
@@ -2112,14 +2523,19 @@ document.querySelectorAll('article,blockquote,details,.button,.text-link').forEa
 document.querySelectorAll('.reveal,.motion-media').forEach(el=>{try{io.observe(el)}catch{}});
 let lastY=scrollY;const header=document.querySelector('.site-header');const motionTick=()=>{const y=scrollY;const vh=innerHeight||1;document.querySelectorAll('.parallax-soft,.parallax-deep').forEach((el)=>{const rect=el.getBoundingClientRect();if(rect.bottom<0||rect.top>vh)return;const center=(rect.top+rect.height/2)-vh/2;el.style.setProperty('--parallax-y',(-center*.035).toFixed(2)+'px');el.style.setProperty('--parallax-y-deep',(-center*.065).toFixed(2)+'px')});document.querySelectorAll('section').forEach((section)=>{const rect=section.getBoundingClientRect();const progress=Math.max(0,Math.min(1,1-Math.abs((rect.top+rect.height/2)-vh/2)/(vh*.85)));section.style.setProperty('--section-progress',progress.toFixed(3));if(progress>.12)section.classList.add('section-inview')});if(header){if(y>lastY&&y>180)header.classList.add('header-hidden');else header.classList.remove('header-hidden')}lastY=y};if(!reduceMotion){addEventListener('scroll',()=>requestAnimationFrame(motionTick),{passive:true});addEventListener('resize',motionTick);motionTick()}
 document.querySelectorAll('.service-row').forEach(row=>{const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)row.classList.add('active');else row.classList.remove('active')}),{threshold:.45});observer.observe(row)});
-if(window.jQuery){jQuery(($)=>{$('.mega-trigger>button').on('click',function(){const item=$(this).closest('.mega-trigger');$('.mega-trigger').not(item).removeClass('is-open').find('button').attr('aria-expanded','false');item.toggleClass('is-open');$(this).attr('aria-expanded',item.hasClass('is-open')?'true':'false')});$(document).on('click',function(event){if(!$(event.target).closest('.mega-trigger').length){$('.mega-trigger').removeClass('is-open').find('button').attr('aria-expanded','false')}});$('.hero-lead-form input,.hero-lead-form textarea').on('focus',function(){$(this).closest('.hero-lead-form').addClass('is-focused')}).on('blur',function(){$(this).closest('.hero-lead-form').removeClass('is-focused')});$('.hero-lead-form').on('submit',function(){$(this).addClass('is-sent').find('button').text('Sending...')});$('.site-header nav a,.mega-menu a').on('mouseenter',function(){$(this).css('transform','translateY(-2px)')}).on('mouseleave',function(){$(this).css('transform','')})})}`;
+if(window.jQuery){jQuery(($)=>{$('.mega-trigger>button').on('click',function(){const item=$(this).closest('.mega-trigger');$('.mega-trigger').not(item).removeClass('is-open').find('button').attr('aria-expanded','false');item.toggleClass('is-open');$(this).attr('aria-expanded',item.hasClass('is-open')?'true':'false')});$(document).on('click',function(event){if(!$(event.target).closest('.mega-trigger').length){$('.mega-trigger').removeClass('is-open').find('button').attr('aria-expanded','false')}});$('.hero-lead-form input,.hero-lead-form textarea,.contact-form input,.contact-form textarea').on('focus',function(){$(this).closest('form').addClass('is-focused')}).on('blur',function(){$(this).closest('form').removeClass('is-focused')});$('.hero-lead-form,.contact-form').on('submit',function(){$(this).addClass('is-sent').find('button').text('Sending...')});$('.site-header nav a,.mega-menu a').on('mouseenter',function(){$(this).stop(true).animate({opacity:.72},140).css('transform','translateY(-2px)')}).on('mouseleave',function(){$(this).stop(true).animate({opacity:1},140).css('transform','')});$('.care-treatment-card,.care-practitioner-card,.care-soft-grid article,.care-visit-timeline article').on('mouseenter',function(){$(this).stop(true).animate({top:-6},180)}).on('mouseleave',function(){$(this).stop(true).animate({top:0},180)}).css('position','relative');$('.care-faq-panel details').on('toggle',function(){if(this.open)$(this).find('p').hide().slideDown(180)});if(!reduceMotion){let ticking=false;$(window).on('scroll',function(){if(ticking)return;ticking=true;requestAnimationFrame(()=>{const y=window.scrollY;$('.care-hero-panel,.care-info-card,.care-credential-panel').css('transform','translate3d(0,'+Math.min(28,y*.025)+'px,0)');ticking=false})})}})}`;
 }
 
 function professionalQualityCss() {
   return `
 h1,h2,h3{text-wrap:balance;overflow-wrap:break-word;hyphens:auto}
 h1{word-spacing:normal}
+.site-header{overflow:visible!important;isolation:isolate}.site-header.header-hidden{transform:none!important}.site-header nav{min-width:0;max-width:100%;align-items:center}.site-header nav>a,.mega-trigger>button{white-space:nowrap}.brand{flex-shrink:0}.header-cta{flex-shrink:0}.mega-menu{z-index:80}
+.nature-care{--care-mist:color-mix(in srgb,var(--secondary),#fff 55%);--care-panel:color-mix(in srgb,var(--surface),var(--secondary) 18%);--care-soft-line:color-mix(in srgb,var(--primary),transparent 88%)}.nature-care h1,.nature-care h2,.nature-care h3{font-family:var(--font-display);letter-spacing:0;word-spacing:normal}.nature-care h1{font-weight:800;font-size:clamp(2.55rem,5.35vw,6rem);line-height:1.01}.nature-care h2{font-weight:800;font-size:clamp(1.9rem,3.5vw,4.35rem);line-height:1.08}.nature-care .lede{font-size:clamp(1.05rem,1.32vw,1.28rem);line-height:1.65;color:var(--muted)}.nature-care article,.nature-care details,.nature-care blockquote,.nature-care .story-card,.nature-care .service-panel,.nature-care .premium-list article,.nature-care .process li,.nature-care .cta-card{border:0!important;box-shadow:0 18px 55px color-mix(in srgb,var(--ink),transparent 92%);background:var(--care-panel)}.nature-care .page-hero,.nature-care .hero{background:linear-gradient(135deg,var(--care-mist),var(--surface));text-align:left}.nature-care .site-header{box-shadow:0 10px 30px color-mix(in srgb,var(--ink),transparent 94%);border-bottom:1px solid var(--care-soft-line)}.nature-care .button,.nature-care .header-cta{border-radius:8px;background:var(--primary);box-shadow:0 14px 36px color-mix(in srgb,var(--primary),transparent 78%)}.nature-care .text-link{color:var(--primary);text-decoration-thickness:2px}.nature-care .trust-pills span{border:0;background:var(--care-panel);box-shadow:0 10px 28px color-mix(in srgb,var(--ink),transparent 94%)}.nature-care img{filter:saturate(.94) contrast(1.02);box-shadow:none}.care-clinic-hero,.care-page-hero{display:grid;grid-template-columns:minmax(0,.92fr) minmax(360px,.78fr);gap:clamp(1.5rem,4vw,4.5rem);align-items:center;min-height:calc(100vh - 84px);background:linear-gradient(120deg,var(--care-mist),var(--surface) 62%);overflow:hidden}.care-clinic-hero{grid-template-columns:minmax(0,.86fr) minmax(360px,.72fr) minmax(280px,.46fr)}.care-hero-copy{max-width:760px}.care-hero-visual{margin:0;align-self:stretch;display:grid;grid-template-rows:1fr auto}.care-hero-visual img,.care-page-hero figure img{height:clamp(440px,68vh,720px);width:100%;object-fit:cover;border-radius:18px}.care-hero-visual figcaption,.care-page-hero figcaption{padding:.85rem 0;color:var(--primary);font-weight:800}.care-hero-panel,.care-info-card,.care-credential-panel{padding:clamp(1.15rem,2.4vw,1.8rem);background:var(--surface);border-radius:18px;box-shadow:0 24px 70px color-mix(in srgb,var(--ink),transparent 90%)}.care-hero-panel h2,.care-info-card h2{font-size:clamp(1.45rem,2.1vw,2.2rem)}.care-hero-panel p,.care-info-card p{display:grid;gap:.2rem;margin:0 0 1rem}.care-hero-panel span{color:var(--muted)}.care-service-overview,.care-team-method{background:var(--surface)}.care-soft-grid,.care-treatment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:clamp(1rem,2vw,1.4rem)}.care-soft-grid article,.care-treatment-card{padding:clamp(1.2rem,2.6vw,1.9rem);border-radius:18px;min-height:240px}.care-soft-grid span,.care-treatment-card span,.care-steps span,.care-visit-timeline span{display:block;color:var(--accent);font-weight:900;margin-bottom:.7rem}.care-treatment-card ul{display:grid;gap:.6rem;margin:1rem 0;padding:0;list-style:none}.care-treatment-card li{padding-left:1rem;border-left:3px solid var(--accent);color:var(--muted)}.care-method-panel{display:grid;grid-template-columns:.75fr 1.25fr;gap:var(--space-lg);align-items:start;background:linear-gradient(135deg,var(--care-mist),var(--surface))}.care-steps,.care-visit-timeline{display:grid;gap:1rem;margin:0;padding:0;list-style:none}.care-steps li,.care-visit-timeline article{padding:clamp(1.1rem,2.4vw,1.7rem);border-radius:18px}.care-faq-panel{background:var(--surface)}.nature-care .faq-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.nature-care details{padding:1rem 1.1rem;border-radius:14px}.nature-care summary{font-weight:800;cursor:pointer}.care-practitioner-hero{grid-template-columns:minmax(0,.9fr) minmax(300px,.5fr);min-height:62vh}.care-credential-panel{display:grid;grid-template-columns:1fr;gap:.8rem}.care-credential-panel span{padding:.85rem 1rem;background:var(--care-mist);border-radius:999px;font-weight:800}.care-practitioner-list{display:grid;gap:clamp(1.5rem,4vw,3.5rem)}.care-practitioner-card{display:grid;grid-template-columns:minmax(260px,.42fr) minmax(0,1fr);gap:clamp(1.4rem,3vw,2.6rem);align-items:center;padding:0!important;overflow:hidden;border-radius:22px}.care-practitioner-card:nth-child(even){grid-template-columns:minmax(0,1fr) minmax(260px,.42fr)}.care-practitioner-card:nth-child(even) img{order:2}.care-practitioner-card img{height:520px;width:100%;object-fit:cover;border-radius:0}.care-practitioner-card>div{padding:clamp(1.2rem,3vw,2.4rem)}.care-practitioner-card dl{display:grid;gap:.8rem;margin:1.2rem 0 0}.care-practitioner-card dl div{display:grid;grid-template-columns:110px 1fr;gap:1rem;padding-top:.8rem;border-top:1px solid var(--care-soft-line)}.care-practitioner-card dt{font-weight:900;color:var(--primary)}.care-practitioner-card dd{margin:0;color:var(--muted)}.care-info-hero{grid-template-columns:minmax(0,.86fr) minmax(320px,.55fr)}.care-info-card p{padding:.75rem 0;border-bottom:1px solid var(--care-soft-line)}.care-visit-timeline{grid-template-columns:repeat(4,minmax(0,1fr));background:var(--care-mist)}.care-visit-timeline .section-heading{grid-column:1/-1}.care-reassurance-strip{margin:0 clamp(1rem,6vw,6rem) clamp(4rem,8vw,8rem);display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.2rem 1.4rem;background:var(--ink);color:var(--surface);border-radius:18px}.care-reassurance-strip span{max-width:760px;color:color-mix(in srgb,var(--surface),transparent 18%)}.care-proof-band{display:grid;grid-template-columns:.85fr 1.15fr;gap:var(--space-lg);align-items:center;background:var(--ink);color:var(--surface)}.care-proof-band article,.care-proof-band blockquote{background:color-mix(in srgb,var(--surface),transparent 91%)!important;color:var(--surface);box-shadow:none}.care-proof-band .stats-depth{grid-template-columns:1fr}.care-proof-band .testimonial-rail{grid-auto-flow:column;grid-auto-columns:minmax(260px,390px);overflow-x:auto}
+.care-proof-band article,.care-proof-band blockquote{background:rgba(255,255,255,.08)!important;color:#fff!important;box-shadow:none!important;border:1px solid rgba(255,255,255,.12)!important}.care-proof-band article strong,.care-proof-band blockquote p{color:#fff!important}.care-proof-band article span,.care-proof-band blockquote cite{color:rgba(255,255,255,.76)!important}.care-proof-band .stats-depth article{min-height:0}.care-proof-band .testimonial-rail blockquote{min-height:260px}
 .brand-logo-short{height:34px;max-width:150px}.brand-logo-medium{height:46px;max-width:190px}.brand-logo-large{height:58px;max-width:230px}.brand-logo-hero{height:64px;max-width:250px}.brand-logo{object-fit:contain}.brand-logo+span{display:none!important}.brand-logo-medium,.brand-logo-large,.brand-logo-hero{width:auto}
+.care-info-hero{grid-template-columns:minmax(0,.72fr) minmax(280px,.52fr) minmax(280px,.45fr)}
+.nature-civic{--civic-signal:color-mix(in srgb,var(--primary),#c92a2a 36%);--civic-panel:color-mix(in srgb,var(--surface),var(--secondary) 16%);--civic-ink:color-mix(in srgb,var(--ink),#101010 18%)}.nature-civic .button,.nature-civic .header-cta{background:var(--civic-signal);color:#fff}.nature-civic .page-hero{background:linear-gradient(135deg,var(--civic-panel),var(--surface));text-align:left}.nature-civic .civic-hero h1,.nature-civic .civic-response-home h1,.nature-civic .civic-safety-home h1{font-size:clamp(2.45rem,4.35vw,5.1rem)!important;line-height:1.03!important;max-width:760px;hyphens:none}.nature-civic .civic-community-strip h2,.nature-civic .civic-programme-band h2{font-size:clamp(1.85rem,3.2vw,4rem)!important;line-height:1.08!important}.civic-hero,.civic-response-home,.civic-safety-home{padding-top:clamp(2.2rem,4.5vw,4.5rem);padding-bottom:clamp(2.2rem,4.5vw,4.5rem)}.civic-hero{display:grid;grid-template-columns:minmax(0,.9fr) minmax(300px,.52fr) minmax(320px,.68fr);gap:clamp(1.2rem,3vw,3.5rem);align-items:center;min-height:calc(100vh - 84px);background:linear-gradient(125deg,var(--civic-ink),color-mix(in srgb,var(--civic-signal),var(--ink) 62%));color:#fff}.civic-hero .lede{color:rgba(255,255,255,.82)}.civic-hero .eyebrow{color:color-mix(in srgb,#fff,var(--accent) 34%)}.civic-hero .text-link{color:#fff}.civic-action-panel{display:grid;gap:.65rem;padding:clamp(1rem,2vw,1.4rem);background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);box-shadow:none}.civic-action-panel h2{font-size:clamp(1.45rem,2.4vw,2.6rem);margin:0}.civic-action-panel a{display:grid;grid-template-columns:42px 1fr;gap:.2rem .8rem;align-items:center;padding:.85rem;text-decoration:none;background:rgba(255,255,255,.12);border-radius:var(--radius-sm)}.civic-action-panel span{grid-row:span 2;font-weight:900;color:var(--accent)}.civic-action-panel strong{line-height:1.12}.civic-action-panel small{color:rgba(255,255,255,.72)}.civic-visual{margin:0;display:grid;gap:.75rem}.civic-visual img{height:clamp(360px,54vh,640px);width:100%;object-fit:cover;border-radius:var(--radius-lg);box-shadow:0 28px 80px rgba(0,0,0,.28)}.civic-visual figcaption{color:rgba(255,255,255,.78);font-weight:800}.civic-service-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--space-md);background:var(--surface)}.civic-response-home{display:grid;grid-template-columns:minmax(0,.88fr) minmax(360px,1fr) minmax(260px,.52fr);gap:clamp(1rem,2.6vw,2.4rem);align-items:center;background:var(--civic-panel);min-height:calc(100vh - 84px)}.response-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.response-board article,.civic-proof-card,.safety-checklist{border:0!important;background:var(--surface);box-shadow:0 22px 70px color-mix(in srgb,var(--ink),transparent 90%)}.response-board article{padding:clamp(1rem,1.8vw,1.4rem)!important;min-height:0}.response-board article h2{font-size:clamp(1.28rem,2vw,2.35rem)!important;line-height:1.12!important;margin:.25rem 0 .65rem}.response-board article p,.civic-proof-card p{font-size:clamp(.95rem,1.05vw,1.05rem);line-height:1.62}.response-board span{font-weight:900;color:var(--civic-signal)}.civic-proof-card{padding:clamp(1rem,1.8vw,1.4rem)!important}.civic-proof-card strong{display:block;font:800 clamp(2.4rem,4.6vw,4.8rem)/1 var(--font-display);color:var(--civic-signal)}.civic-community-strip{display:grid;grid-template-columns:.92fr 1fr;gap:var(--space-lg);align-items:center;background:var(--surface)}.civic-community-strip img{height:520px;width:100%;object-fit:cover}.civic-safety-home{display:grid;grid-template-columns:.88fr .72fr;gap:var(--space-lg);align-items:center;background:linear-gradient(135deg,var(--surface),var(--civic-panel))}.safety-checklist{display:grid;gap:.75rem;padding:var(--space-md)}.safety-checklist h2{font-size:clamp(1.5rem,2.5vw,2.9rem);margin:0}.safety-checklist details{border:0!important;box-shadow:none;background:color-mix(in srgb,var(--secondary),var(--surface) 68%)}.civic-programme-band{background:var(--surface)}@media(max-width:1050px){.civic-hero,.civic-response-home,.civic-community-strip,.civic-safety-home{grid-template-columns:1fr}.response-board{grid-template-columns:repeat(2,minmax(0,1fr))}.civic-visual img,.civic-community-strip img{height:420px}.nature-civic .civic-hero h1,.nature-civic .civic-response-home h1,.nature-civic .civic-safety-home h1{font-size:clamp(2.4rem,7vw,4.6rem)!important}}@media(max-width:680px){.civic-hero,.civic-response-home{min-height:auto}.response-board{grid-template-columns:1fr}.civic-visual img,.civic-community-strip img{height:320px}.civic-action-panel a{grid-template-columns:1fr}.civic-action-panel span{grid-row:auto}.nature-civic .civic-hero h1,.nature-civic .civic-response-home h1,.nature-civic .civic-safety-home h1{font-size:clamp(2.15rem,10vw,3.45rem)!important;line-height:1.05!important}}
 .header-minimal,.header-classic,.header-stacked{border-radius:0!important;box-shadow:0 12px 38px color-mix(in srgb,var(--ink),transparent 92%);padding-block:.9rem}.header-minimal .brand,.header-classic .brand,.header-stacked .brand{min-width:0}.header-minimal nav,.header-classic nav,.header-stacked nav{gap:clamp(.8rem,1.6vw,1.4rem)}.header-minimal .header-cta,.header-classic .header-cta,.header-stacked .header-cta{white-space:nowrap}
 .proof-ledger h2,.authority-columns h2,.home-benefit-board h3,.service-rich-card h2{font-size:clamp(1.45rem,2.35vw,2.75rem)!important;line-height:1.08!important;word-spacing:normal;text-align:left}
 .proof-ledger article,.authority-columns article{padding:clamp(1.1rem,2.4vw,1.75rem)!important;min-height:0!important}
@@ -2132,8 +2548,8 @@ h1{word-spacing:normal}
 .site-header nav{align-items:center}.site-header nav>a,.mega-trigger>button{position:relative;background:transparent;color:inherit;border:0;padding:.65rem .15rem;font:inherit;font-weight:800;cursor:pointer}.site-header nav>a:after,.mega-trigger>button:after{content:"";position:absolute;left:0;right:100%;bottom:.28rem;height:2px;background:var(--accent);transition:right .22s ease}.site-header nav>a:hover:after,.mega-trigger:hover>button:after,.mega-trigger.is-open>button:after{right:0}.mega-trigger{position:relative;display:inline-flex}.mega-menu{position:absolute;top:calc(100% + 18px);left:50%;z-index:40;width:min(760px,calc(100vw - 2rem));display:grid;grid-template-columns:1.05fr 1fr 1fr;gap:.85rem;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 10%);border:1px solid var(--line);box-shadow:0 28px 80px color-mix(in srgb,var(--ink),transparent 84%);transform:translate(-50%,10px);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}.mega-menu a,.mega-menu>span{display:grid;gap:.3rem;padding:.9rem;text-decoration:none;background:color-mix(in srgb,var(--secondary),var(--surface) 72%);border-radius:var(--radius-sm)}.mega-menu small,.mega-menu em{font-size:.85rem;color:var(--muted);font-style:normal;line-height:1.45}.mega-menu .mega-cta{background:var(--primary);color:#fff;align-content:center;text-align:center;font-weight:900}.professional-hero-form{grid-template-columns:minmax(0,.95fr) minmax(340px,.72fr) minmax(300px,.55fr);align-items:center}.professional-hero-form-left{grid-template-columns:minmax(300px,.55fr) minmax(0,.95fr) minmax(340px,.72fr)}.professional-hero-wide{grid-template-columns:minmax(0,1fr) minmax(320px,.6fr);grid-template-areas:"copy form" "visual visual"}.professional-hero-wide aside{grid-area:copy}.professional-hero-wide .hero-lead-form{grid-area:form}.professional-hero-wide .professional-visual{grid-area:visual}.hero-lead-form{display:grid;gap:.85rem;padding:clamp(1.1rem,2.4vw,1.7rem);background:color-mix(in srgb,var(--surface),#fff 18%);border:1px solid var(--line);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 84%);border-radius:var(--radius-lg)}.hero-lead-form h2{font-size:clamp(1.45rem,2.1vw,2.35rem);margin:0}.hero-lead-form input,.hero-lead-form textarea{background:color-mix(in srgb,var(--surface),#fff 16%)}.hero-lead-form textarea{min-height:110px}.hero-lead-form small{color:var(--muted);line-height:1.45}.hero-lead-form.is-sent{outline:3px solid color-mix(in srgb,var(--accent),transparent 35%)}
 .professional-client-hero{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,.92fr);gap:clamp(1.5rem,4vw,4.5rem);align-items:center;min-height:calc(100vh - 84px);padding-top:clamp(3rem,6vw,5rem);padding-bottom:clamp(3rem,6vw,5rem);background:linear-gradient(90deg,color-mix(in srgb,var(--surface),#fff 12%),color-mix(in srgb,var(--secondary),var(--surface) 65%))}.professional-client-hero h1{font-size:clamp(2.7rem,4.75vw,5.45rem)!important;line-height:1.02!important;max-width:760px!important;letter-spacing:0}.professional-client-hero .lede{font-size:clamp(1.05rem,1.35vw,1.28rem);max-width:720px;color:var(--muted)}.professional-copy{display:grid;gap:var(--space-sm);align-content:center}.hero-actions{display:flex;gap:.9rem;flex-wrap:wrap;align-items:center}.professional-action-stack{display:grid;grid-template-columns:1fr;gap:1rem;align-self:stretch}.professional-action-stack .professional-visual{min-height:0}.professional-action-stack .professional-visual img{height:clamp(260px,34vh,420px);width:100%;object-fit:cover;border-radius:var(--radius-lg) var(--radius-lg) 0 0}.professional-action-stack .professional-visual figcaption{padding:.85rem 1rem;border:0;background:var(--surface);border-radius:0 0 var(--radius-lg) var(--radius-lg);max-width:none}.professional-action-stack .hero-lead-form{border-radius:var(--radius-lg);box-shadow:0 22px 70px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card{position:absolute;left:clamp(1rem,6vw,6rem);bottom:clamp(1rem,4vw,2.2rem);max-width:340px;padding:1rem;background:color-mix(in srgb,var(--surface),#fff 18%);border:0;box-shadow:0 20px 60px color-mix(in srgb,var(--ink),transparent 88%)}.hero-proof-card span{display:block;font:800 clamp(2.2rem,4vw,4rem)/1 var(--font-display);color:var(--primary)}.hero-proof-card strong{display:block}.hero-proof-card p{margin:.35rem 0 0;color:var(--muted);font-size:.95rem}.client-psychology-section{display:grid;grid-template-columns:.8fr 1.2fr;gap:var(--space-lg);align-items:start;background:var(--surface);border:0}.client-psychology-section .decision-stack{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-sm)}.professional-method-section{background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 70%),var(--surface));border:0}.professional-method-section .section-heading h2,.client-psychology-section .section-heading h2{font-size:clamp(2rem,3.15vw,3.7rem)!important;line-height:1.08!important;max-width:720px}.professional-method-section .section-heading p,.client-psychology-section .section-heading p{font-size:clamp(1rem,1.15vw,1.16rem);max-width:740px}.professional-method-section .decision-stack article,.client-psychology-section .decision-stack article,.proof-ledger article,.practice-matrix article{border:0!important;outline:0!important;box-shadow:0 24px 70px color-mix(in srgb,var(--ink),transparent 91%);background:color-mix(in srgb,var(--surface),#fff 8%)}.professional-method-section .decision-stack h3,.client-psychology-section .decision-stack h3{font-size:clamp(1.35rem,1.85vw,2.15rem);line-height:1.12}.professional-method-section .decision-stack p,.client-psychology-section .decision-stack p{font-size:clamp(.98rem,1.02vw,1.08rem);line-height:1.65}
 .briefing-hero{grid-template-columns:minmax(0,.85fr) minmax(320px,.58fr) minmax(320px,.78fr);align-items:center;gap:clamp(1.4rem,3.8vw,4rem);min-height:calc(100vh - 84px);background:linear-gradient(135deg,color-mix(in srgb,var(--secondary),var(--surface) 52%),var(--surface))}.briefing-left h1,.authority-hero h1{font-size:clamp(2.55rem,4.8vw,5.4rem)!important;line-height:1.03!important;max-width:760px}.briefing-left p,.authority-hero p{font-size:clamp(1rem,1.2vw,1.2rem);max-width:680px;color:var(--muted)}.briefing-visual{margin:0;align-self:stretch;display:grid;grid-template-rows:1fr auto}.briefing-visual img{height:100%;min-height:560px;width:100%;object-fit:cover;border-radius:var(--radius-lg);box-shadow:0 28px 86px color-mix(in srgb,var(--ink),transparent 86%)}.briefing-visual figcaption,.authority-visual figcaption{font-weight:800;color:var(--primary);padding:.85rem 0}.briefing-dossier{display:grid;gap:.8rem}.briefing-dossier article{border:0!important;background:color-mix(in srgb,var(--surface),#fff 10%);box-shadow:0 20px 58px color-mix(in srgb,var(--ink),transparent 91%);padding:1rem}.briefing-dossier h2{font-size:clamp(1.15rem,1.5vw,1.7rem)!important;line-height:1.15;margin:.35rem 0}.authority-hero{display:grid;grid-template-columns:minmax(0,.85fr) minmax(300px,.62fr) minmax(320px,.62fr);gap:clamp(1.4rem,4vw,4rem);align-items:center;min-height:calc(100vh - 84px);background:linear-gradient(110deg,var(--surface),color-mix(in srgb,var(--secondary),var(--surface) 58%))}.authority-visual{margin:0;align-self:stretch;display:grid;grid-template-rows:1fr auto}.authority-visual img{height:clamp(460px,68vh,720px);width:100%;object-fit:cover;border-radius:var(--radius-lg);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 86%)}.authority-card{border:0!important;background:color-mix(in srgb,var(--surface),#fff 12%);box-shadow:0 28px 86px color-mix(in srgb,var(--ink),transparent 86%);padding:clamp(1rem,2.4vw,1.65rem)}.authority-card h2{font-size:clamp(1.45rem,2.2vw,2.45rem)!important;line-height:1.12}.authority-card .hero-lead-form{box-shadow:none;border:0;background:transparent;padding:0;margin-top:1rem}.authority-columns,.practice-matrix,.proof-ledger{gap:clamp(1rem,2vw,1.4rem)}.authority-columns article,.proof-ledger article,.practice-matrix article{transition:transform .24s ease,box-shadow .24s ease}.authority-columns article:hover,.proof-ledger article:hover,.practice-matrix article:hover{transform:translateY(-4px);box-shadow:0 30px 90px color-mix(in srgb,var(--ink),transparent 88%)}
-@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide,.professional-client-hero,.client-psychology-section,.briefing-hero,.authority-hero{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.hero-proof-card{position:static;max-width:none}.briefing-visual img,.authority-visual img{height:460px;min-height:0}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
-@media(max-width:680px){.professional-hero-visual h1,.software-hero h1,.professional-client-hero h1{font-size:clamp(2.25rem,10vw,3.55rem)!important;line-height:1.06!important}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}.client-psychology-section .decision-stack{grid-template-columns:1fr}.professional-client-hero{min-height:auto}}
+@media(max-width:1050px){.professional-hero-form,.professional-hero-form-left,.professional-hero-wide,.professional-client-hero,.client-psychology-section,.briefing-hero,.authority-hero,.care-clinic-hero,.care-page-hero,.care-method-panel,.care-proof-band,.care-practitioner-card,.care-practitioner-card:nth-child(even),.care-info-hero{grid-template-columns:1fr;grid-template-areas:none}.professional-hero-wide aside,.professional-hero-wide .hero-lead-form,.professional-hero-wide .professional-visual{grid-area:auto}.hero-proof-card{position:static;max-width:none}.briefing-visual img,.authority-visual img,.care-hero-visual img,.care-page-hero figure img,.care-practitioner-card img{height:460px;min-height:0}.care-practitioner-card:nth-child(even) img{order:0}.care-visit-timeline{grid-template-columns:repeat(2,minmax(0,1fr))}.mega-menu{left:0;transform:translate(0,10px);grid-template-columns:1fr;max-height:70vh;overflow:auto}.mega-trigger:hover .mega-menu,.mega-trigger:focus-within .mega-menu,.mega-trigger.is-open .mega-menu{transform:translate(0,0)}}
+@media(max-width:680px){.professional-hero-visual h1,.software-hero h1,.professional-client-hero h1{font-size:clamp(2.25rem,10vw,3.55rem)!important;line-height:1.06!important}.professional-intelligence{padding-top:3rem;padding-bottom:3rem}.client-psychology-section .decision-stack{grid-template-columns:1fr}.professional-client-hero{min-height:auto}.nature-care .faq-columns,.care-visit-timeline{grid-template-columns:1fr}.care-clinic-hero,.care-page-hero{min-height:auto}.care-hero-visual img,.care-page-hero figure img,.care-practitioner-card img{height:340px}.care-reassurance-strip{align-items:flex-start;flex-direction:column;margin-inline:1rem}.care-practitioner-card dl div{grid-template-columns:1fr}.site-header,.header-minimal,.header-classic,.header-stacked,.header-editorial,.header-overlay,.header-sidebar{position:sticky!important;top:0!important;left:0!important;right:auto!important;bottom:auto!important;width:100%!important;transform:none!important;border-radius:0!important;display:grid!important;grid-template-columns:1fr!important;gap:.75rem!important;padding:.85rem 1rem!important}.header-brand-row{width:100%;display:flex;align-items:center;justify-content:space-between}.site-header nav{width:100%;display:flex!important;gap:.85rem!important;overflow-x:auto;flex-wrap:nowrap;padding-bottom:.2rem;-webkit-overflow-scrolling:touch}.site-header nav>a,.mega-trigger>button{font-size:.95rem}.header-actions{width:100%;display:flex;align-items:center;justify-content:space-between}.header-cta{width:max-content;max-width:100%}.mega-menu{position:fixed;left:1rem!important;right:1rem!important;top:5.75rem!important;width:auto!important;max-height:62vh;overflow:auto;transform:none!important}.header-overlay .header-note,.header-editorial>p{display:none!important}}
 `;
 }
 
@@ -2313,6 +2729,48 @@ ${(site.blueprint?.pages || []).map((pageItem) => `- ${pageItem.title}: ${pageIt
 ## AI Image Assets
 
 ${(site.generatedImages || []).length ? site.generatedImages.map((asset) => `- ${asset.id}: ${asset.file || `not generated (${asset.error || 'skipped'})`}${asset.fallback ? ` (designed fallback: ${asset.error})` : ' (AI generated)'}`).join('\n') : '- AI image generation was skipped or unavailable.'}
+`;
+}
+
+function researchAndStrategyReport(site) {
+  const research = site.content.researchBrief || {};
+  const layout = site.content.layoutGuidance || {};
+  const pages = site.blueprint?.pages || [];
+  return `# Research And Strategy: ${site.brief.businessName}
+
+This is an inferred strategy report generated from the prompt, approved brief, operator answers, and industry patterns. It is not live web research and should be checked by the operator before publishing regulated claims, prices, awards, opening hours, or case-study results.
+
+## Market Context
+
+${research.marketContext || `${site.brief.industry} visitors compare trust, clarity, proof, and next-step friction before they enquire.`}
+
+## Visitor Objections
+
+${(research.visitorObjections || []).map((item) => `- ${item}`).join('\n') || '- Can I trust this business?\n- Is this the right fit?\n- What happens after I make contact?'}
+
+## Proof Required
+
+${(research.proofRequired || []).map((item) => `- ${item}`).join('\n') || '- Clear services\n- Specific process\n- Testimonials\n- Useful FAQs'}
+
+## Local SEO Angle
+
+${research.localSeoAngle || `Connect ${site.brief.industry} search intent with ${site.brief.location} proof, service detail, FAQs, and contact routes.`}
+
+## Content Gaps To Confirm
+
+${(research.contentGaps || []).map((item) => `- ${item}`).join('\n') || '- Exact prices, hours, credentials, case studies, and real customer quotes.'}
+
+## Layout Guidance
+
+- Header: ${layout.header || 'Visible sticky brand, navigation, and primary action.'}
+- Hero: ${layout.hero || 'Specific value proposition, trust signal, CTA, and relevant visual proof.'}
+- Section rhythm: ${layout.sectionRhythm || 'Alternate services, proof, process, FAQs, imagery, and CTA.'}
+- Mobile: ${layout.mobile || 'Stack cleanly, keep navigation visible, avoid overlap.'}
+- CTA placement: ${layout.ctaPlacement || 'Above the fold, after proof, and at the final decision point.'}
+
+## Page Jobs
+
+${pages.map((pageItem) => `- ${pageItem.title}: ${pageItem.purpose || 'Answer a visitor question.'} Sections: ${(pageItem.sections || []).join(', ') || 'Hero, proof, CTA'}. Conversion: ${pageItem.conversionTarget || 'Contact'}.`).join('\n')}
 `;
 }
 

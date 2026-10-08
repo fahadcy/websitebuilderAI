@@ -54,13 +54,8 @@ export async function generateSiteImages(site, outDir, progress = () => {}) {
   const imageDir = path.join(outDir, 'assets', 'images');
   await fs.mkdir(imageDir, { recursive: true });
   if (!enabled || !client) {
-    return {
-      imagePlan,
-      assetMap,
-      generatedImages,
-      skipped: true,
-      reason: enabled ? 'OPENAI_API_KEY is missing or image client is unavailable; using curated photographic URLs in generated pages.' : 'AI image generation disabled; using curated photographic URLs in generated pages.'
-    };
+    const reason = enabled ? 'OPENAI_API_KEY is missing or image client is unavailable; using packaged designed fallback images.' : 'AI image generation disabled; using packaged designed fallback images.';
+    return createFallbackImages(site, imageDir, imagePlan, assetMap, generatedImages, reason);
   }
 
   const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
@@ -136,10 +131,10 @@ async function writeFallbackImage(site, imageDir, asset, index, reason) {
 function fallbackSvg(site, asset, index, reason) {
   const { width, height } = dimensionsFor(asset);
   const colors = site.tokens?.colors || {};
-  const primary = colors.primary || '#111111';
-  const secondary = colors.secondary || '#f4f4f4';
-  const accent = colors.accent || '#777777';
-  const ink = colors.ink || '#111111';
+  const primary = colors.primary || 'oklch(18% 0.02 250)';
+  const secondary = colors.secondary || 'oklch(97% 0.01 250)';
+  const accent = colors.accent || 'oklch(62% 0.09 225)';
+  const ink = colors.ink || 'oklch(18% 0.02 250)';
   const offset = (index % 5) * 34;
   const opacity = index % 2 ? '.16' : '.24';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${xml(asset.purpose)} visual asset">
@@ -151,10 +146,10 @@ function fallbackSvg(site, asset, index, reason) {
   <rect width="${width}" height="${height}" filter="url(#grain)" opacity=".45"/>
   <path d="M${width * .08} ${height * .18} H${width * .82} V${height * .26} H${width * .08} Z" fill="${xml(ink)}" opacity="${opacity}"/>
   <path d="M${width * .12} ${height * .34} H${width * .58} V${height * .39} H${width * .12} Z" fill="${xml(accent)}" opacity=".42"/>
-  <path d="M${width * .12} ${height * .46} H${width * .72} V${height * .5} H${width * .12} Z" fill="#fff" opacity=".28"/>
-  <rect x="${width * .58 - offset}" y="${height * .55}" width="${width * .34}" height="${height * .28}" fill="#fff" opacity=".18"/>
+  <path d="M${width * .12} ${height * .46} H${width * .72} V${height * .5} H${width * .12} Z" fill="white" opacity=".28"/>
+  <rect x="${width * .58 - offset}" y="${height * .55}" width="${width * .34}" height="${height * .28}" fill="white" opacity=".18"/>
   <rect x="${width * .1 + offset / 3}" y="${height * .58}" width="${width * .34}" height="${height * .22}" fill="${xml(ink)}" opacity=".14"/>
-  <path d="M0 ${height * .88} C${width * .22} ${height * .7}, ${width * .5} ${height}, ${width} ${height * .72} V${height} H0 Z" fill="#fff" opacity=".18"/>
+  <path d="M0 ${height * .88} C${width * .22} ${height * .7}, ${width * .5} ${height}, ${width} ${height * .72} V${height} H0 Z" fill="white" opacity=".18"/>
   <metadata>${xml(reason || 'Designed fallback image generated locally when AI image generation was unavailable.')}</metadata>
 </svg>`;
 }
@@ -189,6 +184,7 @@ function visualCueForNature(nature) {
   if (/commerce|shoe|retail/.test(text)) return 'product-led retail styling, tactile materials, clean shelves or studio surfaces, sale-ready but premium;';
   if (/hospitality|restaurant/.test(text)) return 'warm hospitality lighting, plated detail, room atmosphere, staff craft, reservation intent;';
   if (/care|physio|dental|clinic/.test(text)) return 'calm clinical environment, clean equipment, reassuring human presence, careful hands, trust-led detail;';
+  if (/civic|fire|emergency|rescue|public safety/.test(text)) return 'public safety environment, fire station detail, emergency readiness, community prevention, clean official atmosphere;';
   if (/education|tutor|course/.test(text)) return 'focused learning environment, desks, notebooks, calm mentor/student energy, modern study detail;';
   if (/fitness|gym/.test(text)) return 'high-energy training environment, equipment detail, movement, grit, clean contrast;';
   if (/software|saas/.test(text)) return 'modern team workflow, devices without readable screens, analytical atmosphere, crisp office light;';

@@ -135,6 +135,22 @@ function pageQualityChecks(site, pages) {
   const checks = [
     check({
       category: 'ux',
+      name: 'Homepage includes a real header with navigation',
+      passed: /<header\b[^>]*class=["'][^"']*site-header/i.test(index) && /<nav\b[\s\S]*?<a\b/i.test(index),
+      detail: /<header\b/i.test(index) ? `${count(index, /<nav\b/gi)} nav blocks found` : 'No header found',
+      severity: 'blocker',
+      weight: 6
+    }),
+    check({
+      category: 'ux',
+      name: 'Header includes a primary action',
+      passed: /class=["'][^"']*header-cta|href=["'][^"']*(contact|booking|reserve|demo|enquiry)/i.test(index),
+      detail: 'Checks for a visible header CTA or action-oriented nav link',
+      severity: 'blocker',
+      weight: 4
+    }),
+    check({
+      category: 'ux',
       name: isSinglePage ? 'Generated site follows intentional one-page format' : 'Generated site includes multiple real pages',
       passed: isSinglePage ? pageCount >= 3 && /href="#contact"|id="contact"/i.test(index) : pageCount >= 6,
       detail: isSinglePage ? `${pageCount} HTML pages found with one-page anchor navigation` : `${pageCount} HTML pages found`,
@@ -176,10 +192,18 @@ function pageQualityChecks(site, pages) {
     check({
       category: 'content',
       name: 'No lorem ipsum or AI placeholder language',
-      passed: !/lorem ipsum|your business|sample text|company background and mission/i.test(stripTags(Object.values(pages).join('\n'))),
+      passed: !/lorem ipsum|your business|sample text|company background and mission|supports the page goal|layout keeps the visitor/i.test(stripTags(Object.values(pages).join('\n'))),
       detail: 'Scans generated page copy for obvious filler',
       severity: 'blocker',
       weight: 5
+    }),
+    check({
+      category: 'content',
+      name: 'Generated package includes research and strategy guidance',
+      passed: /researchBrief|Research And Strategy|market context|visitor objections/i.test(JSON.stringify(site || {})) || /research-and-strategy\.md/i.test(Object.keys(pages).join('\n')),
+      detail: 'Checks the site object carries strategy research fields',
+      severity: 'warning',
+      weight: 2
     }),
     check({
       category: 'ux',
@@ -346,6 +370,14 @@ function uxChecks(pages, css, appJs) {
     }),
     check({
       category: 'ux',
+      name: 'Dark proof sections keep readable card contrast',
+      passed: !/care-proof-band/i.test(html) || (/care-proof-band article[\s\S]*rgba\(255,255,255,/i.test(css) && /care-proof-band article strong[\s\S]*#fff/i.test(css)),
+      detail: 'Prevents pale proof cards with white text on healthcare templates',
+      severity: 'blocker',
+      weight: 4
+    }),
+    check({
+      category: 'ux',
       name: 'Contact page has actionable form or contact links',
       passed: /<form[\s\S]*name=.*email|mailto:|tel:/i.test(pages['contact.html'] || pages['index.html'] || ''),
       detail: 'Visitor can make contact without guessing',
@@ -414,6 +446,15 @@ async function browserChecks(outDir) {
           visibleBlocks: rects.length,
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
+          headerHeight: document.querySelector('header')?.getBoundingClientRect().height || 0,
+          headerVisible: (() => {
+            const header = document.querySelector('header');
+            if (!header) return false;
+            const rect = header.getBoundingClientRect();
+            const styles = getComputedStyle(header);
+            return rect.width > 100 && rect.height > 40 && styles.display !== 'none' && styles.visibility !== 'hidden' && Number(styles.opacity || 1) > 0;
+          })(),
+          navLinks: document.querySelectorAll('header nav a, header .header-cta').length,
           heroHeight: document.querySelector('main section')?.getBoundingClientRect().height || 0,
           imageCount: images.length,
           brokenImages: images.filter((img) => img.src && !/^https?:/i.test(img.src) && img.complete && (img.width === 0 || img.height === 0)).length,
@@ -440,6 +481,14 @@ async function browserChecks(outDir) {
         detail: results.map((result) => `${result.viewport.name}: ${result.snapshot.scrollWidth}px/${result.snapshot.clientWidth}px`).join('; '),
         severity: 'blocker',
         weight: 5
+      }),
+      check({
+        category: 'browser qa',
+        name: 'Header is visible and usable in browser',
+        passed: results.every((result) => result.snapshot.headerVisible && result.snapshot.navLinks >= 3),
+        detail: results.map((result) => `${result.viewport.name}: ${Math.round(result.snapshot.headerHeight)}px header, ${result.snapshot.navLinks} nav/action links`).join('; '),
+        severity: 'blocker',
+        weight: 6
       }),
       check({
         category: 'browser qa',
@@ -560,6 +609,7 @@ function projectNatureFromSite(site) {
   const value = `${site?.brief?.industry || site?.industry || ''} ${site?.prompt || site?.metadata?.prompt || ''}`.toLowerCase();
   if (/software|saas|app|platform|dashboard|ai/.test(value)) return 'software';
   if (/tutor|school|course|education|academy/.test(value)) return 'education';
+  if (/fire station|fire service|fire safety|emergency service|emergency response|rescue|public safety|community safety|civic/.test(value)) return 'civic';
   if (/shoe|shop|store|ecommerce|sale|retail/.test(value)) return 'commerce';
   if (/clinic|health|dental|physio|therapy|care/.test(value)) return 'care';
   return 'service';

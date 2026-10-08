@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
 import fs from 'node:fs';
 import path from 'node:path';
+import { migrateMysqlTrainingStore, mysqlTrainingConfigured } from './mysqlTrainingStore.js';
 
 const root = process.cwd();
 const dataDir = path.join(root, 'data');
@@ -33,6 +34,14 @@ export async function migrate() {
   if (!existing) {
     const passwordHash = await bcrypt.hash(adminPassword, 12);
     db.prepare('INSERT INTO builder_users (email, password_hash, role) VALUES (?, ?, ?)').run(adminEmail, passwordHash, 'admin');
+  }
+
+  if (mysqlTrainingConfigured()) {
+    try {
+      await migrateMysqlTrainingStore();
+    } catch (error) {
+      console.warn(`MySQL training store migration skipped: ${error.message}`);
+    }
   }
 }
 
