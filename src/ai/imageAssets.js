@@ -16,7 +16,9 @@ const DEFAULT_PURPOSES = [
 ];
 
 export function normalizeImagePlan(plan, site) {
-  const source = Array.isArray(plan) ? plan : Array.isArray(plan?.assets) ? plan.assets : [];
+  // Prompts written by the site-copy AI for this exact subject beat the generic review-step plan.
+  const hasSubjectPrompts = Object.keys(site.content?.imagePrompts || {}).length >= 2;
+  const source = hasSubjectPrompts ? [] : Array.isArray(plan) ? plan : Array.isArray(plan?.assets) ? plan.assets : [];
   const fallback = defaultImagePlan(site);
   const items = source.length ? source : fallback;
   return items.slice(0, imageLimit()).map((item, index) => ({
@@ -40,14 +42,38 @@ export function defaultImagePlan(site) {
     'Create realistic premium editorial website photography with believable lighting, natural composition, useful negative space, and a commercial art-direction standard.',
     'Avoid generic stock-photo smiles, random props, over-polished plastic skin, fake signage, visible text, typography, logos, watermarks, UI labels, surreal objects, and unrelated animals.'
   ].join(' ');
+  const subject = site.content?.imagePrompts || {};
   return DEFAULT_PURPOSES.map((asset) => ({
     ...asset,
-    prompt: `${base} Image role: ${asset.purpose}. ${directionForPurpose(asset.purpose, nature)}`
+    prompt: subject[asset.id]
+      ? `${subject[asset.id]} ${photoStyle(site)} Image role: ${asset.purpose}.`
+      : `${base} Image role: ${asset.purpose}. ${directionForPurpose(asset.purpose, nature)}`
+  }));
+}
+
+function photoStyle(site) {
+  return [
+    'Photorealistic, natural light, authentic and editorial, like a high-end travel or lifestyle magazine.',
+    site.design?.mode === 'dark' ? 'Low-key, moody light.' : 'Bright, warm, inviting light.',
+    'No text, no logos, no watermarks, no UI, no people looking at the camera in a posed corporate way.'
+  ].join(' ');
+}
+
+/** One image per collection item (trips, products...), capped by COLLECTION_IMAGE_LIMIT. */
+export function collectionImagePlan(site) {
+  const items = site.content?.collection?.items || [];
+  const limit = Math.max(0, Math.min(12, Number(process.env.COLLECTION_IMAGE_LIMIT ?? 6)));
+  return items.slice(0, limit).map((item) => ({
+    id: `item-${item.id}`,
+    purpose: `item:${item.id}`,
+    size: '1024x1024',
+    aspect: 'square',
+    prompt: `${item.imagePrompt || `${item.title}${item.location ? `, ${item.location}` : ''}, ${item.tag || ''} ${item.category || ''}`} ${photoStyle(site)}`
   }));
 }
 
 export async function generateSiteImages(site, outDir, progress = () => {}) {
-  const imagePlan = normalizeImagePlan(site.metadata?.imagePlan, site);
+  const imagePlan = [...normalizeImagePlan(site.metadata?.imagePlan, site), ...collectionImagePlan(site)];
   const enabled = site.metadata?.generateImages !== false && process.env.GENERATE_AI_IMAGES !== 'false';
   const assetMap = {};
   const generatedImages = [];
@@ -55,7 +81,7 @@ export async function generateSiteImages(site, outDir, progress = () => {}) {
   await fs.mkdir(imageDir, { recursive: true });
   if (!imagePlan.length) {
     // AI images switched off (AI_IMAGE_COUNT=0): still ship designed artwork so pages never reference missing files.
-    const plan = defaultImagePlan(site);
+    const plan = [...defaultImagePlan(site), ...collectionImagePlan(site)];
     await createFallbackImages(site, imageDir, plan, assetMap, generatedImages, 'AI image generation disabled.');
     return { imagePlan: plan, assetMap, generatedImages, skipped: true };
   }

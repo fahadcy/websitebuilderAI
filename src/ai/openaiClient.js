@@ -939,7 +939,7 @@ export function isAiTextEnabled() {
   return Boolean(client);
 }
 
-const SITE_COPY_NATURES = ['care', 'hospitality', 'commerce', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'trades', 'civic', 'service'];
+const SITE_COPY_NATURES = ['care', 'travel', 'hospitality', 'commerce', 'professional', 'fitness', 'portfolio', 'software', 'property', 'event', 'education', 'trades', 'civic', 'service'];
 
 /**
  * One structured call that turns the user's prompt into a complete, business-specific
@@ -949,13 +949,15 @@ const SITE_COPY_NATURES = ['care', 'hospitality', 'commerce', 'professional', 'f
 export async function generateSiteCopy(prompt, draft = {}, learningGuidance = '') {
   const system = `${eliteDesignerDirective}
 
-You are a senior UK conversion copywriter and information architect. You write specific, concrete website copy for one real business.
+You are a senior UK web designer, conversion copywriter and information architect. You plan and write one complete, specific website.
 Rules:
-- Use ONLY facts the user supplied for names, prices, phone numbers, addresses, opening hours, team members, accreditations, ratings and review counts. Never invent these. If a fact is missing, leave that field empty or the array empty.
+- The user's brief is the specification. Every section, feature, colour, headline and button label they ask for must appear. Use quoted text (headlines, button labels) word for word.
+- Real-world facts (phone numbers, addresses, opening hours, team members, accreditations, ratings, review counts) must come from the user. Never invent them: leave those fields empty.
+- If the user says the business is fictional/sample/demo, or explicitly asks for sample content (sample trips, sample products, sample reviews), write realistic sample content and label reviews as samples.
+- Otherwise never invent customer testimonials.
 - Never write placeholder copy ("Lorem ipsum", "placeholder", "Starter/Growth/Complete" packages, "X made easier for Y").
-- Never invent testimonials or quotes from customers.
-- Write in British English. Be specific to the industry: a dentist talks about treatments, comfort and booking; a bakery about bakes, ordering and collection.
-- Headlines: short (max 9 words), benefit-led, no clichés like "Welcome to" or "Your trusted partner".
+- Write in British English, specific to the subject. Headlines short (max 10 words) unless the user supplied one.
+- Image prompts must describe the actual subject matter of this business (e.g. real destinations, dishes, treatments, products), photographic, natural, no text or logos. Never generic office or corporate scenes unless the business is an office-based service.
 - Return strict JSON only.
 - The user's request always wins over lessons from past feedback.${learningGuidance ? `
 
@@ -972,42 +974,51 @@ Rule-based first guess (correct it if wrong): ${JSON.stringify({ business_name: 
 Return JSON with exactly this shape:
 {
   "business_name": "",
-  "industry": "short label, e.g. Dental Practice, Artisan Bakery, Emergency Plumber",
+  "industry": "short label, e.g. Dental Practice, Weekend Travel Company, Artisan Bakery",
   "project_nature": "one of ${SITE_COPY_NATURES.join(' | ')}",
   "location": "town/area or empty",
   "target_audience": "one sentence",
-  "tone": "calm | bold | warm | professional | creative",
-  "goal": "book appointment | sell product | request quote | request demo | generate leads | make reservation | generate volunteer enquiries",
-  "pages": ["Home", "...4-8 pages that fit this business; honour pages the user listed...", "Contact"],
-  "brand_colours": { "primary": "#hex", "accent": "#hex" },
-  "design": { "direction": "one of atelier | serene | kinetic | noir | aurora | craft | swiss | pop", "mode": "light | dark", "mood": "3-6 words describing the visual mood" },
-  "statement": "one bold, specific brand statement of 12-24 words for a large typographic section",
-  "marquee": ["4-8 short phrases (1-3 words) for a scrolling ticker, e.g. services or values"],
+  "tone": "calm | bold | warm | professional | creative | luxury",
+  "goal": "book appointment | sell product | request quote | request demo | generate leads | make reservation | make booking",
+  "pages": ["Home", "...pages that fit; honour pages the user listed; if the user lists sections of ONE page, return just ['Home']...", "Contact"],
   "one_page": false,
+  "brand_colours": { "primary": "#hex main brand colour", "accent": "#hex accent colour", "background": "#hex page background (light, e.g. warm cream) or empty" },
+  "design": { "direction": "one of atelier | serene | kinetic | noir | aurora | craft | swiss | pop", "mode": "light | dark", "mood": "3-6 words", "heading_style": "bold | elegant | friendly | technical" },
+  "statement": "one bold, specific brand statement of 12-24 words",
+  "marquee": ["4-8 short phrases (1-3 words)"],
   "hero": { "eyebrow": "", "h1": "", "subheadline": "max 30 words", "primary_cta": "2-5 words", "secondary_cta": "2-4 words" },
-  "trust_signals": [{ "value": "short e.g. 4.9★, 15 yrs, CQC, Same-day", "label": "short" }],
+  "trust_signals": [{ "value": "short", "label": "short" }],
   "services": [{ "title": "", "description": "1-2 specific sentences", "price": "only if supplied" }],
+  "collection": null,
   "benefits": [{ "title": "", "text": "" }],
   "process": [{ "title": "", "text": "" }],
   "about": { "heading": "", "body": "2-4 sentences" },
   "team": [{ "name": "", "role": "", "bio": "" }],
   "pricing": [{ "name": "", "price": "", "description": "" }],
-  "testimonials": [{ "quote": "", "name": "" }],
+  "testimonials": [{ "quote": "", "name": "", "detail": "e.g. 'Lake District weekend, May 2026'", "sample": true }],
   "faqs": [{ "q": "", "a": "" }],
   "contact": { "phone": "", "email": "", "address": "", "hours": "" },
   "final_cta": { "heading": "", "text": "" },
-  "page_copy": {
-    "<Page title from pages, except Home and Contact>": {
-      "h1": "", "intro": "2 sentences",
-      "sections": [{ "title": "", "text": "2-3 sentences", "bullets": ["optional"] }]
-    }
-  },
-  "seo": { "primary_keyword": "e.g. dentist in Didsbury", "meta_description": "140-160 characters" }
+  "page_copy": { "<Page title, except Home and Contact>": { "h1": "", "intro": "2 sentences", "sections": [{ "title": "", "text": "2-3 sentences", "bullets": ["optional"] }] } },
+  "image_prompts": { "hero": "", "about": "", "band": "wide atmospheric scene", "detail": "", "service": "" },
+  "seo": { "primary_keyword": "", "meta_description": "140-160 characters" }
 }
-Colours: if the user gave colours, use them exactly. Otherwise choose a distinctive palette that suits this specific business and audience (avoid default corporate blue unless it truly fits).
-Design directions: atelier = elegant editorial serif, light; serene = soft, rounded, calm, light; kinetic = huge bold type, energetic; noir = dark luxury serif; aurora = dark tech with gradients; craft = warm, handmade, organic; swiss = crisp corporate grid; pop = playful, bright, chunky. Pick the one that best fits the brief's tone.
-Set one_page true only if the user asked for a one-page/landing page, or listed no pages and the business is very small.
-Give 3 trust_signals, 3-8 services, 3 benefits, 3-4 process steps, 4-6 faqs, and 2-4 sections per page in page_copy. team, pricing and testimonials must be empty arrays unless the user supplied them.`;
+
+"collection": if the business offers a browsable set of things (trips, tours, products, menu items, courses, classes, properties, events, rooms) OR the user asks for cards/listings/filters/a catalogue, return instead:
+{
+  "label": "Trips", "item_label": "trip", "intro": "1 sentence",
+  "currency": "GBP", "price_suffix": "per person",
+  "categories": ["Countryside", "Beach", "City"],
+  "filters": { "category": true, "max_price": true, "sort_price": true },
+  "favourites": true,
+  "booking": { "enabled": true, "cta": "Book This Trip", "quantity_label": "Number of travellers", "date_label": "Departure date", "max_quantity": 8, "confirmation": "short demo confirmation text that makes clear no real booking or payment was made" },
+  "items": [{ "id": "kebab-case", "title": "", "category": "one of categories", "location": "", "price": 289, "duration": "2 nights", "tag": "activity type e.g. Hiking", "summary": "1-2 sentences", "highlights": ["3-4 short"], "itinerary": [{ "title": "Day 1 · Friday", "detail": "1-2 sentences" }], "image_prompt": "photographic description of this specific place/item" }]
+}
+Use 6 items unless the user asks for another number. Turn on only the filters/booking/favourites the brief needs (booking for bookable things, favourites when asked).
+
+Colours: if the user named colours, map them to roles (e.g. "forest green, warm cream, and orange accents" -> primary forest green, background warm cream, accent orange). Otherwise choose a distinctive palette that suits the subject.
+Design directions: atelier = elegant editorial serif; serene = soft, rounded, calm; kinetic = huge bold type, energetic; noir = dark luxury; aurora = dark tech gradients; craft = warm, rounded, outdoorsy/handmade; swiss = crisp corporate grid; pop = playful, bright, chunky. Pick the one that best fits the brief's words (e.g. "bold headings, rounded cards, adventure" -> craft or kinetic, not atelier).
+Give 3 trust_signals, 3-8 services, 3 benefits, 3-4 process steps (use the user's steps if given), 4-6 faqs, and 2-4 sections per page in page_copy. team and pricing must be empty unless supplied. testimonials: empty unless supplied or the user asked for sample reviews (then mark sample true).`;
 
   return jsonCompletion(system, user);
 }

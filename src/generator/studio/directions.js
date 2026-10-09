@@ -6,6 +6,7 @@ export const DIRECTIONS = {
   atelier: {
     name: 'Atelier editorial',
     mode: 'light',
+    boldFonts: { display: 'Playfair Display', displayWeight: 800, query: 'family=Playfair+Display:wght@700;800;900' },
     fonts: { display: 'Cormorant Garamond', displayWeight: 600, body: 'Manrope', query: 'family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700' },
     radius: { sm: '2px', md: '4px', lg: '6px', pill: '2px' },
     displayTracking: '-0.01em', displayScale: 1.12, displayLeading: 1.02, headingTransform: 'none',
@@ -17,13 +18,14 @@ export const DIRECTIONS = {
     footer: ['wordmark', 'columns'],
     motion: { preloader: true, cursor: false, magnetic: true, tilt: false, grain: false, blobs: false, aurora: false, marquee: false, imageReveal: true },
     tint: 0.008, lightBgL: 0.975, darkBgL: 0.16, accentShift: 40,
-    natures: { portfolio: 5, professional: 3, care: 2, hospitality: 3, property: 4, event: 2, commerce: 2 },
+    natures: { portfolio: 5, professional: 3, care: 2, hospitality: 3, property: 4, event: 2, commerce: 2, travel: 3 },
     tones: { luxury: 4, creative: 2, calm: 1, professional: 1 },
     defaultPrimary: '#5b4636'
   },
   serene: {
     name: 'Serene soft',
     mode: 'light',
+    boldFonts: { display: 'Fraunces', displayWeight: 700, query: 'family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800' },
     fonts: { display: 'Fraunces', displayWeight: 500, body: 'Figtree', query: 'family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Figtree:wght@400;500;600;700' },
     radius: { sm: '12px', md: '22px', lg: '36px', pill: '999px' },
     displayTracking: '-0.02em', displayScale: 1, displayLeading: 1.06, headingTransform: 'none',
@@ -35,7 +37,7 @@ export const DIRECTIONS = {
     footer: ['columns', 'wordmark'],
     motion: { preloader: false, cursor: false, magnetic: false, tilt: true, grain: false, blobs: true, aurora: false, marquee: false, imageReveal: true },
     tint: 0.016, lightBgL: 0.982, darkBgL: 0.18, accentShift: 55,
-    natures: { care: 6, education: 4, service: 2, hospitality: 1, civic: 3, property: 2 },
+    natures: { care: 6, education: 4, service: 2, hospitality: 1, civic: 3, property: 2, travel: 2 },
     tones: { calm: 4, warm: 2, professional: 1 },
     defaultPrimary: '#2a7f8f'
   },
@@ -53,13 +55,14 @@ export const DIRECTIONS = {
     footer: ['wordmark'],
     motion: { preloader: true, cursor: false, magnetic: true, tilt: false, grain: false, blobs: false, aurora: false, marquee: true, imageReveal: true },
     tint: 0.006, lightBgL: 0.97, darkBgL: 0.14, accentShift: 160,
-    natures: { fitness: 6, event: 5, commerce: 4, portfolio: 3, trades: 2, software: 2 },
+    natures: { fitness: 6, event: 5, commerce: 4, portfolio: 3, trades: 2, software: 2, travel: 3 },
     tones: { bold: 5, creative: 2 },
     defaultPrimary: '#e0412b'
   },
   noir: {
     name: 'Noir luxe',
     mode: 'dark',
+    boldFonts: { display: 'Playfair Display', displayWeight: 800, query: 'family=Playfair+Display:ital,wght@0,700;0,800;1,700' },
     fonts: { display: 'DM Serif Display', displayWeight: 400, body: 'Outfit', query: 'family=DM+Serif+Display:ital@0;1&family=Outfit:wght@300;400;500;600' },
     radius: { sm: '2px', md: '3px', lg: '4px', pill: '999px' },
     displayTracking: '-0.015em', displayScale: 1.08, displayLeading: 1, headingTransform: 'none',
@@ -71,7 +74,7 @@ export const DIRECTIONS = {
     footer: ['wordmark', 'columns'],
     motion: { preloader: true, cursor: true, magnetic: true, tilt: false, grain: true, blobs: false, aurora: false, marquee: false, imageReveal: true },
     tint: 0.01, lightBgL: 0.97, darkBgL: 0.13, accentShift: 30,
-    natures: { hospitality: 4, professional: 3, portfolio: 3, event: 3, commerce: 2, property: 2 },
+    natures: { hospitality: 4, professional: 3, portfolio: 3, event: 3, commerce: 2, property: 2, travel: 2 },
     tones: { luxury: 6, bold: 1 },
     defaultPrimary: '#c8a24a'
   },
@@ -96,6 +99,7 @@ export const DIRECTIONS = {
   craft: {
     name: 'Craft organic',
     mode: 'light',
+    boldFonts: { display: 'Fraunces', displayWeight: 800, query: 'family=Fraunces:opsz,wght@9..144,700;9..144,800;9..144,900' },
     fonts: { display: 'Young Serif', displayWeight: 400, body: 'Work Sans', query: 'family=Young+Serif&family=Work+Sans:wght@400;500;600;700' },
     radius: { sm: '10px', md: '18px', lg: '30px', pill: '999px' },
     displayTracking: '-0.015em', displayScale: 1.02, displayLeading: 1.05, headingTransform: 'none',
@@ -107,7 +111,7 @@ export const DIRECTIONS = {
     footer: ['columns', 'wordmark'],
     motion: { preloader: false, cursor: false, magnetic: false, tilt: true, grain: true, blobs: false, aurora: false, marquee: true, imageReveal: true },
     tint: 0.022, lightBgL: 0.968, darkBgL: 0.19, accentShift: 120,
-    natures: { hospitality: 6, commerce: 3, trades: 3, care: 1, event: 1, service: 2 },
+    natures: { hospitality: 6, commerce: 3, trades: 3, care: 1, event: 1, service: 2, travel: 6 },
     tones: { warm: 5, creative: 1 },
     defaultPrimary: '#a4462a'
   },
@@ -143,7 +147,7 @@ export const DIRECTIONS = {
     footer: ['wordmark', 'columns'],
     motion: { preloader: false, cursor: false, magnetic: true, tilt: true, grain: false, blobs: true, aurora: false, marquee: true, imageReveal: true },
     tint: 0.02, lightBgL: 0.98, darkBgL: 0.18, accentShift: 150,
-    natures: { education: 4, event: 4, fitness: 2, commerce: 2, hospitality: 2, care: 1 },
+    natures: { education: 4, event: 4, fitness: 2, commerce: 2, hospitality: 2, care: 1, travel: 2 },
     tones: { creative: 3, warm: 2, bold: 2 },
     defaultPrimary: '#ff5a36'
   }
@@ -189,6 +193,11 @@ export function chooseDirection({ nature, tone, prompt = '', aiDirection = '', r
     const d = DIRECTIONS[id];
     let score = (d.natures[nature] || 0) * 2 + (d.tones[tone] || 0) * 1.5;
     for (const [target, pattern] of explicit) if (target === id && pattern.test(lower)) score += 12;
+    // Shape words: rounded briefs suit soft directions, sharp/minimal ones the square-cornered directions.
+    if (/\b(rounded|soft corners|pill|bubbly)\b/.test(lower)) score += ['serene', 'craft', 'pop'].includes(id) ? 8 : ['kinetic', 'swiss', 'atelier', 'noir'].includes(id) ? -8 : 0;
+    if (/\b(sharp|square|angular|brutalist)\b/.test(lower)) score += ['kinetic', 'swiss'].includes(id) ? 6 : 0;
+    // "bold headings" is a typography request, not an energy request.
+    if (id === 'kinetic' && /\bbold (?:headings?|headlines?|titles?|type|typography)\b/.test(lower) && !/\b(energetic|loud|sporty|street|high[- ]energy)\b/.test(lower)) score -= 10;
     if (aiDirection === id) score += 5;
     return { id, score: score + random() * 3 };
   }).sort((a, b) => b.score - a.score);

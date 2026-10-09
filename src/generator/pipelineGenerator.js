@@ -208,7 +208,8 @@ async function validateGeneratedSite(outDir, brief, content, files, plan) {
   checks.push(check('No rendered text below 12px', !/font-size:\s*(?:[0-9]|1[01])px/i.test(css)));
   checks.push(check('Mobile layout includes 375px-safe breakpoint', /@media\(max-width:767px\)/.test(css)));
   checks.push(check('Reduced-motion fallback present', /prefers-reduced-motion/.test(css)));
-  checks.push(check('No local storage', !/localStorage|sessionStorage/.test(files.map(([, body]) => body).join('\n'))));
+  const appJs = files.find(([name]) => name === 'assets/js/app.js')?.[1] || '';
+  checks.push(check('Browser storage only used for favourites, with error handling', !/sessionStorage/.test(appJs) && (!/localStorage/.test(appJs) || /try\{var v=JSON\.parse\(window\.localStorage/.test(appJs))));
   checks.push(check('Sitemap lists pages', (plan.onePage ? ['Home'] : brief.pages).every((page) => sitemapContains(files, page))));
   checks.push(check('Primary keyword in first 100 words', firstWords(htmlFiles[0]?.[1] || '', 160).toLowerCase().includes(String(content.primaryKeyword || '').toLowerCase().split(' ')[0])));
   return { passed: checks.every((item) => item.passed), checks };

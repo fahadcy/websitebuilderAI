@@ -77,16 +77,24 @@ const BLACK = { l: 0.16, c: 0.01, h: 0 };
  * Build a complete light + dark palette from a brand primary (and optional accent).
  * `mode` is the default appearance of the design direction.
  */
-export function buildPalette({ primaryHex, accentHex, direction, mode = 'light' }) {
+export function buildPalette({ primaryHex, accentHex, backgroundHex, direction, mode = 'light' }) {
   const seed = hexToOklch(primaryHex) || hexToOklch(direction.defaultPrimary) || { l: 0.5, c: 0.12, h: 220 };
   const accentSeed = hexToOklch(accentHex) || { l: clamp(seed.l + 0.18, 0.6, 0.85), c: clamp(seed.c * 1.1, 0.08, 0.17), h: (seed.h + direction.accentShift) % 360 };
   const tint = direction.tint ?? 0.012;
   const h = seed.h;
 
+  const userBg = hexToOklch(backgroundHex);
   const light = {};
-  light.bg = { l: direction.lightBgL ?? 0.985, c: tint, h };
-  light.surface = { l: Math.min(1, light.bg.l + 0.012), c: tint * 0.6, h };
-  light.surface2 = { l: light.bg.l - 0.035, c: tint * 1.6, h };
+  if (userBg && userBg.l >= 0.8) {
+    // The brief named a page colour (e.g. warm cream): use it, kept light enough for body text.
+    light.bg = { l: clamp(userBg.l, 0.93, 0.995), c: Math.min(userBg.c, 0.05), h: userBg.h };
+    light.surface = { l: Math.min(0.995, light.bg.l + 0.025), c: light.bg.c * 0.5, h: userBg.h };
+    light.surface2 = { l: light.bg.l - 0.045, c: Math.min(light.bg.c * 1.4, 0.06), h: userBg.h };
+  } else {
+    light.bg = { l: direction.lightBgL ?? 0.985, c: tint, h };
+    light.surface = { l: Math.min(1, light.bg.l + 0.012), c: tint * 0.6, h };
+    light.surface2 = { l: light.bg.l - 0.035, c: tint * 1.6, h };
+  }
   light.ink = { l: 0.2, c: Math.min(0.03, seed.c * 0.25), h };
   light.muted = ensureContrast({ l: 0.47, c: Math.min(0.03, seed.c * 0.25), h }, light.bg, 4.6);
   light.primary = { l: clamp(seed.l, 0.3, 0.62), c: clamp(seed.c, 0.04, 0.2), h };
@@ -100,7 +108,7 @@ export function buildPalette({ primaryHex, accentHex, direction, mode = 'light' 
   light.onDeep = { l: 0.97, c: 0.01, h };
 
   const dark = {};
-  dark.bg = { l: direction.darkBgL ?? 0.17, c: clamp(seed.c * 0.25, 0.01, 0.04), h };
+  dark.bg = userBg && userBg.l <= 0.35 ? { l: clamp(userBg.l, 0.1, 0.24), c: Math.min(userBg.c, 0.05), h: userBg.c > 0.01 ? userBg.h : h } : { l: direction.darkBgL ?? 0.17, c: clamp(seed.c * 0.25, 0.01, 0.04), h };
   dark.surface = { l: dark.bg.l + 0.045, c: dark.bg.c * 1.1, h };
   dark.surface2 = { l: dark.bg.l + 0.09, c: dark.bg.c * 1.2, h };
   dark.ink = { l: 0.96, c: 0.01, h };

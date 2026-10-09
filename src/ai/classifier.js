@@ -12,6 +12,11 @@ const NATURES = {
     strong: ['dentist', 'dentists', 'dental', 'orthodontist', 'orthodontics', 'invisalign', 'hygienist', 'physio', 'physiotherapy', 'physiotherapist', 'chiropractor', 'chiropractic', 'osteopath', 'osteopathy', 'clinic', 'gp surgery', 'doctor', 'doctors', 'medical', 'pharmacy', 'optician', 'opticians', 'optometrist', 'podiatrist', 'podiatry', 'dermatology', 'aesthetics clinic', 'veterinary', 'vets', 'vet practice', 'care home', 'counselling', 'counsellor', 'psychotherapy', 'therapist', 'massage therapy', 'beauty salon', 'hair salon', 'barber', 'barbers', 'salon', 'spa', 'nail bar'],
     weak: ['patients', 'patient', 'treatment', 'treatments', 'health', 'healthcare', 'wellness', 'therapy', 'appointment', 'appointments', 'implants', 'whitening', 'hygiene', 'nhs', 'cqc', 'injury', 'rehab', 'rehabilitation', 'beauty']
   },
+  travel: {
+    industry: 'Travel and Holidays',
+    strong: ['travel company', 'travel agency', 'tour operator', 'weekend breaks', 'weekend break', 'weekend travel', 'holidays', 'holiday company', 'getaways', 'getaway', 'retreats', 'adventure travel', 'walking holidays', 'tours', 'safari', 'cruises', 'glamping', 'campsite', 'holiday cottages', 'holiday lets'],
+    weak: ['travel', 'trip', 'trips', 'destination', 'destinations', 'itinerary', 'adventure', 'escape', 'explore', 'travellers', 'travelers', 'departure', 'staycation']
+  },
   hospitality: {
     industry: 'Hospitality',
     strong: ['restaurant', 'cafe', 'café', 'coffee shop', 'bakery', 'patisserie', 'takeaway', 'bistro', 'pub', 'bar and grill', 'cocktail bar', 'wine bar', 'hotel', 'bed and breakfast', 'b&b', 'guest house', 'catering', 'food truck', 'pizzeria', 'deli'],

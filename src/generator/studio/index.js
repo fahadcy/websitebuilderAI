@@ -6,7 +6,7 @@
 // 4. render             -> static, editor-safe HTML + CSS + jQuery runtime
 
 import { DIRECTIONS, chooseDirection, seededRandom, pick } from './directions.js';
-import { buildPalette, css as oklchCss } from './palette.js';
+import { buildPalette, hexToOklch, css as oklchCss } from './palette.js';
 import { buildCss } from './styles.js';
 import { buildRuntime } from './runtime.js';
 import * as S from './sections.js';
@@ -22,11 +22,18 @@ const IMAGE_KEYS = {
 export function planDesign({ brief, content, prompt = '', seed, aiDesign = {} }) {
   const random = seededRandom(`${seed}|${brief.business_name}`);
   const directionId = DIRECTIONS[aiDesign.direction] && aiDesign.lock ? aiDesign.direction : chooseDirection({ nature: brief.project_nature, tone: brief.tone, prompt, aiDirection: aiDesign.direction, random });
-  const direction = DIRECTIONS[directionId];
+  const baseDirection = DIRECTIONS[directionId];
+  // "bold headings" / AI heading_style bold -> heavier display face for that direction.
+  const wantsBoldType = /\bbold (?:headings?|headlines?|titles?|type|typography)\b/i.test(prompt) || content.headingStyle === 'bold';
+  const direction = wantsBoldType && baseDirection.boldFonts
+    ? { ...baseDirection, fonts: { ...baseDirection.fonts, display: baseDirection.boldFonts.display, displayWeight: baseDirection.boldFonts.displayWeight, query: `${baseDirection.boldFonts.query}&${baseDirection.fonts.query.split('&').filter((part) => !part.includes(baseDirection.fonts.display.replace(/ /g, '+'))).join('&')}` } }
+    : baseDirection;
   const wantsDark = /\b(dark (?:theme|mode|background|site|website|design|look)|black background|dark,? moody|moody|noir|after dark)\b/i.test(prompt);
   const wantsLight = /\b(light (?:theme|mode|background)|white background|bright and airy)\b/i.test(prompt);
   const mode = wantsDark ? 'dark' : wantsLight ? 'light' : aiDesign.mode === 'dark' || aiDesign.mode === 'light' ? (direction.mode === 'dark' && aiDesign.mode === 'light' ? 'dark' : aiDesign.mode) : direction.mode;
-  const palette = buildPalette({ primaryHex: brief.colours?.primary || aiDesign.primary, accentHex: brief.colours?.accent || aiDesign.accent, direction, mode });
+  const bgSeed = hexToOklch(brief.colours?.background || '');
+  const finalMode = bgSeed ? (bgSeed.l <= 0.35 ? 'dark' : bgSeed.l >= 0.8 ? 'light' : mode) : mode;
+  const palette = buildPalette({ primaryHex: brief.colours?.primary || aiDesign.primary, accentHex: brief.colours?.accent || aiDesign.accent, backgroundHex: brief.colours?.background, direction, mode: finalMode });
   const variants = {
     hero: pick(direction.hero, random),
     services: pick(direction.services, random),
@@ -59,13 +66,17 @@ function homeSections(plan, content) {
     [rest[i], rest[j]] = [rest[j], rest[i]];
   }
   const ordered = plan.random() > 0.5 ? ['about', ...rest] : [rest[0], 'about', ...rest.slice(1)].filter(Boolean);
-  const list = ['hero', ['fullbleed', 'editorial', 'kinetic'].includes(plan.variants.hero) ? 'proof' : null, 'services', ...ordered, 'faq', 'cta'];
+  const list = ['hero', ['fullbleed', 'editorial', 'kinetic'].includes(plan.variants.hero) ? 'proof' : null, content.collection ? 'collection' : 'services', ...ordered, 'faq', 'cta'];
   if (plan.onePage || content.contactOnHome) list.push('contact');
   return list.filter(Boolean);
 }
 
 function innerSections(page, content) {
   const lower = page.toLowerCase();
+  const c = content.collection;
+  if (c && (lower === c.label.toLowerCase() || new RegExp(`\\b${c.itemLabel.toLowerCase()}s?\\b`).test(lower) || /shop|catalog|browse|explore|trips|tours|destinations/.test(lower))) return ['pageHero', 'collection', 'testimonials', 'cta'];
+  if (/review|testimonial/.test(lower)) return ['pageHero', 'testimonials', 'cta'];
+  if (/how it works|how to book|booking process/.test(lower)) return ['pageHero', 'process', 'faq', 'cta'];
   if (/^contact/.test(lower)) return ['pageHero', 'contact'];
   if (/faq|question/.test(lower)) return ['pageHero', 'faq', 'cta'];
   if (/gallery|before|results|portfolio|our work|^work$/.test(lower)) return ['pageHero', 'gallery', 'pageSections', 'cta'];
@@ -84,9 +95,10 @@ function innerSections(page, content) {
  */
 export function renderStudioSite({ brief, content, site, plan, pages, headFor, logo }) {
   const contactPage = pages.find((item) => /^contact/i.test(item.page))?.slug;
+  const collectionPage = content.collection ? pages.find((item) => item.page !== 'Home' && innerSections(item.page, content).includes('collection'))?.slug : null;
   const servicesPage = pages.find((item) => item.page !== 'Home' && /service|treatment|menu|bakes|product|shop|collection|classes|courses|features|properties|cakes/i.test(item.page));
   const navLinks = (current) => plan.onePage
-    ? [['Services', '#services'], ['About', '#about'], content.team?.length ? ['Team', '#team'] : null, content.pricing?.length ? ['Prices', '#pricing'] : null, content.faqs?.length ? ['FAQ', '#faq'] : null, ['Contact', '#contact']].filter(Boolean).map(([label, href]) => ({ label, href: current === 'Home' ? href : `index.html${href}`, current: false }))
+    ? [content.collection ? [content.collection.label, '#explore'] : ['Services', '#services'], content.process?.length ? ['How it works', '#how-it-works'] : null, ['About', '#about'], content.team?.length ? ['Team', '#team'] : null, content.pricing?.length ? ['Prices', '#pricing'] : null, content.testimonials?.length ? ['Reviews', '#reviews'] : null, content.faqs?.length ? ['FAQ', '#faq'] : null, ['Contact', '#contact']].filter(Boolean).map(([label, href]) => ({ label, href: current === 'Home' ? href : `index.html${href}`, current: false }))
     : pages.filter((item) => !item.utility).map((item) => ({ label: item.page, href: item.slug, current: item.page === current }));
 
   const img = (purpose) => {
@@ -100,7 +112,7 @@ export function renderStudioSite({ brief, content, site, plan, pages, headFor, l
   pages.forEach((item, pageIndex) => {
     const ctx = {
       brief, content, site, page: item.page, pageData: item.data, pageIndex, isHome: item.page === 'Home',
-      onePage: plan.onePage, servicesPage: servicesPage?.slug, contactPage, slug: item.slug, logo,
+      onePage: plan.onePage, servicesPage: servicesPage?.slug, contactPage, collectionPage, slug: item.slug, logo,
       motion: plan.direction.motion, img, pageImage: ['detail', 'service', 'about', 'band'][pageIndex % 4],
       navLinks: navLinks(item.page),
       variant: (kind) => plan.variants[kind]
@@ -112,6 +124,7 @@ export function renderStudioSite({ brief, content, site, plan, pages, headFor, l
         case 'hero': return S.hero(ctx);
         case 'proof': return S.proof(ctx);
         case 'services': return S.services(ctx);
+        case 'collection': return S.collection(ctx);
         case 'servicesAlt': return S.services(altCtx, { title: item.data.h1 === item.page ? S.servicesHeading(brief) : `${item.page} at ${brief.business_name}` });
         case 'about': return S.about(ctx);
         case 'band': return S.parallaxBand(ctx);

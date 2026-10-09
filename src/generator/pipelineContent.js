@@ -53,7 +53,10 @@ export function extractLocation(text) {
   const capitalised = [...source.matchAll(/\b(?:in|based in|located in|serving|across)\s+([A-Z][a-zA-Z'-]+(?:(?:,\s*|\s+)(?!And\b|With\b|For\b|Called\b)[A-Z][a-zA-Z'-]+){0,2})/g)]
     .map((match) => match[1].trim())
     .filter((value) => !LOCATION_STOPWORDS.has(value.toLowerCase().split(/[\s,]+/)[0]));
-  if (capitalised.length) return capitalised[0].replace(/,\s*$/, '');
+  const notPlace = (value) => /^(GBP|USD|EUR|AUD|CAD|UK pounds|British pounds|Pounds|English|British|Welsh|Scottish|Irish|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Spring|Summer|Autumn|Winter)\b/i.test(value) || /^[A-Z]{2,4}$/.test(value) && value !== 'UK';
+  const places = capitalised.filter((value) => !notPlace(value));
+  if (places.length) return places[0].replace(/,\s*$/, '');
+  if (capitalised.length) return '';
   const lower = source.match(/\bin\s+([a-z][a-z'-]{2,})\b/i);
   if (lower && !LOCATION_STOPWORDS.has(lower[1].toLowerCase())) return titleCaseWords(lower[1]);
   return '';
@@ -69,22 +72,52 @@ export function extractPageList(text) {
     .slice(0, 9);
 }
 
+const BACKGROUND_COLOURS = {
+  'warm cream': '#f7eedb', cream: '#f6efe0', ivory: '#fbf7ee', 'off-white': '#f7f6f2', 'off white': '#f7f6f2', 'warm white': '#fbf8f2',
+  white: '#ffffff', sand: '#efe4cf', beige: '#f1e7d6', linen: '#f6f0e6', stone: '#ece8e1', oat: '#f1eadc', parchment: '#f5ecd7', 'pale grey': '#f1f2f4', 'light grey': '#eef0f2'
+};
+
+/**
+ * Pull colours out of a brief and give each a role:
+ * "forest green, warm cream, and orange accents" -> primary green, background cream, accent orange.
+ */
 export function extractColours(text) {
   const source = String(text || '');
-  const hexes = [...source.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})\b/gi)].map((match) => normaliseHex(match[0]));
   const lower = source.toLowerCase();
-  const words = Object.keys(COLOUR_WORDS)
-    .sort((a, b) => b.length - a.length)
-    .filter((word) => new RegExp(`\\b${word}\\b`).test(lower))
-    .filter((word, index, list) => !list.some((other, otherIndex) => otherIndex < index && other.includes(word)))
-    .map((word) => ({ word, hex: COLOUR_WORDS[word], at: lower.search(new RegExp(`\\b${word}\\b`)) }))
-    .sort((a, b) => a.at - b.at)
-    .map((item) => item.hex);
-  const all = [...hexes, ...words].filter((hex) => !isNearNeutral(hex) || hexes.includes(hex));
-  const primary = all[0] || '';
+  const mentions = [];
+  for (const match of source.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})\b/gi)) mentions.push({ hex: normaliseHex(match[0]), at: match.index, word: match[0], explicit: true });
+  const vocabulary = { ...COLOUR_WORDS, ...Object.fromEntries(Object.keys(BACKGROUND_COLOURS).map((word) => [word, BACKGROUND_COLOURS[word]])) };
+  const taken = [];
+  Object.keys(vocabulary).sort((a, b) => b.length - a.length).forEach((word) => {
+    for (const match of lower.matchAll(new RegExp(`\\b${word.replace(/[-]/g, '[- ]')}\\b`, 'g'))) {
+      if (taken.some(([a, b]) => match.index < b && match.index + word.length > a)) continue;
+      taken.push([match.index, match.index + word.length]);
+      mentions.push({ hex: vocabulary[word], at: match.index, word, explicit: false });
+    }
+  });
+  mentions.sort((a, b) => a.at - b.at);
+  // A word immediately followed by a hex code ("soft teal (#2A9D8F)") defers to the exact hex.
+  const hexAt = mentions.filter((m) => m.explicit).map((m) => m.at);
+  for (let i = mentions.length - 1; i >= 0; i -= 1) {
+    const m = mentions[i];
+    if (!m.explicit && hexAt.some((at) => at > m.at && at - (m.at + m.word.length) <= 4)) mentions.splice(i, 1);
+  }
+  const roleOf = (mention) => {
+    const after = lower.slice(mention.at + mention.word.length, mention.at + mention.word.length + 16);
+    const before = lower.slice(Math.max(0, mention.at - 24), mention.at);
+    if (/^\s*(?:\(#[0-9a-f]+\)\s*)?(?:as (?:an? )?)?(?:accents?|highlights?)\b/.test(after) || /(?:accents?|highlights?|pops?) (?:of|in)\s+(?:\w+\s+)?$/.test(before)) return 'accent';
+    if (/^\s*(?:\(#[0-9a-f]+\)\s*)?(?:as (?:the )?)?(?:background|backdrop|base)\b/.test(after) || /(?:background|backdrop)(?: of| in)?\s+(?:\w+\s+)?$/.test(before)) return 'background';
+    if (BACKGROUND_COLOURS[mention.word]) return 'background';
+    if (/^\s*(?:text|font|type)\b/.test(after)) return 'text';
+    return 'brand';
+  };
+  const tagged = mentions.map((mention) => ({ ...mention, role: roleOf(mention) })).filter((mention) => mention.explicit || mention.role === 'background' || !isNearNeutral(mention.hex));
+  const background = tagged.find((m) => m.role === 'background')?.hex || '';
+  const brand = tagged.filter((m) => m.role === 'brand');
+  const primary = brand[0]?.hex || tagged.find((m) => m.role === 'accent')?.hex || '';
   // The accent must be a visibly different hue ("teal #2A9D8F ... sand gold" -> gold, not a second teal).
-  const accent = all.slice(1).find((hex) => hueGap(hex, primary) > 30) || '';
-  return { primary, accent };
+  const accent = tagged.find((m) => m.role === 'accent' && m.hex !== primary)?.hex || brand.slice(1).find((m) => hueGap(m.hex, primary) > 30)?.hex || '';
+  return { primary, accent, background };
 }
 
 function hueOf(hex) {
@@ -121,7 +154,8 @@ export function extractContact(text) {
   const email = source.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0]?.replace(/[.,]$/, '') || '';
   const postcode = source.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/)?.[0] || '';
   const address = postcode ? (source.match(new RegExp(`[^.\\n(]*${postcode.replace(/\s/, '\\s*')}`))?.[0] || '').replace(/^.*?\(/, '').replace(/^[^\d]*?(?=\d)/, '').trim() : '';
-  const hours = source.match(/\b(?:open(?:ing)?(?:\s+hours)?)\s*:?\s*([^.\n]{8,120})/i)?.[1]?.trim() || '';
+  // Only real opening times ("Open Mon-Fri 8am-6pm"), not "should open a detailed view".
+  const hours = source.match(/\b(?:opening hours|open)\s*:?\s*((?:mon|tue|wed|thu|fri|sat|sun|daily|every day|7 days|24\/7|24 hours|weekdays)[^.\n]{2,140})/i)?.[1]?.trim() || '';
   return { phone, email, address, hours };
 }
 
@@ -236,6 +270,8 @@ export function parsePromptFacts(prompt, metadata = {}) {
     gallery: wantsGallery(text),
     onePage: /\b(one[- ]page|single[- ]page|landing page|onepager|one pager)\b/i.test(text),
     tone: toneFromPrompt(text),
+    headline: (text.match(/\bheadline\s*(?:of|is|:|reading|saying)?\s*["“']([^"”]{4,140})["”']/i) || [])[1] || '',
+    ctaLabel: (text.match(/["“]([^"”]{3,32})["”]\s+(?:button|cta|call to action)/i) || [])[1] || '',
     keywords: [...text.matchAll(/["“]([^"”]{4,40})["”]/g)].map((match) => match[1]).filter((value) => value.split(' ').length <= 4 && !/book online/i.test(value)),
     lower: text.toLowerCase()
   };
@@ -488,20 +524,26 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
   const team = aiTeam.length ? aiTeam : facts.team;
   const aiPricing = cleanList(ai?.pricing, (item) => (str(item?.name, 60) && str(item?.price, 40) ? { name: str(item.name, 60), price: str(item.price, 40), description: str(item.description, 200) } : null), 1, 12);
   const pricing = aiPricing.length ? aiPricing : facts.pricing;
-  const testimonials = cleanList(ai?.testimonials, (item) => (str(item?.quote, 300) ? { quote: str(item.quote, 300), name: str(item.name, 60) } : null), 1, 6);
+  const testimonials = cleanList(ai?.testimonials, (item) => (str(item?.quote, 400) ? { quote: str(item.quote, 400), name: str(item.name, 60), detail: str(item.detail, 80), sample: item.sample !== false } : null), 1, 6);
 
   const hero = ai?.hero || {};
-  const h1 = !PLACEHOLDER.test(str(hero.h1)) && str(hero.h1, 90) ? str(hero.h1, 90) : lib.h1;
+  const h1 = facts.headline || (!PLACEHOLDER.test(str(hero.h1)) && str(hero.h1, 120) ? str(hero.h1, 120) : lib.h1);
   const contactAi = ai?.contact || {};
+  // Contact facts must come from the user. AI values are only kept if they appear in the brief.
+  const inBrief = (value) => {
+    const v = str(value, 160).toLowerCase().replace(/\s+/g, ' ');
+    return v.length > 3 && facts.lower.replace(/\s+/g, ' ').includes(v) ? str(value, 160) : '';
+  };
   const contact = {
-    phone: facts.contact.phone || str(contactAi.phone, 30),
-    email: facts.contact.email || str(contactAi.email, 80),
-    address: facts.contact.address || str(contactAi.address, 160),
-    hours: facts.contact.hours || str(contactAi.hours, 160)
+    phone: facts.contact.phone || inBrief(contactAi.phone),
+    email: facts.contact.email || inBrief(contactAi.email),
+    address: facts.contact.address || inBrief(contactAi.address),
+    hours: facts.contact.hours || inBrief(contactAi.hours)
   };
   const colours = {
     primary: facts.colours.primary || hexOrEmpty(ai?.brand_colours?.primary) || (metadata.logoPalette?.primary && hexOrEmpty(metadata.logoPalette.primary)) || '',
-    accent: facts.colours.accent || hexOrEmpty(ai?.brand_colours?.accent) || ''
+    accent: facts.colours.accent || hexOrEmpty(ai?.brand_colours?.accent) || '',
+    background: facts.colours.background || hexOrEmpty(ai?.brand_colours?.background) || ''
   };
   const tone = facts.tone || (['calm', 'bold', 'warm', 'professional', 'creative', 'luxury'].includes(str(ai?.tone)) ? str(ai.tone) : lib.tone);
   const goal = str(ai?.goal, 60) || lib.goal;
@@ -535,7 +577,7 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
     keywords: [primaryKeyword, `${businessName} ${industry}`.toLowerCase()],
     contact_email: contact.email || `hello@${slugish(businessName)}.co.uk`,
     contact_phone: contact.phone || '',
-    address: contact.address || (location ? location : ''),
+    address: contact.address || '',
     hours: contact.hours,
     ai_generated: Boolean(ai)
   };
@@ -546,7 +588,7 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
       eyebrow: str(hero.eyebrow, 60) || lib.eyebrow,
       h1,
       subheadline: str(hero.subheadline, 260) || lib.sub,
-      primaryCta: str(hero.primary_cta, 40) || lib.cta,
+      primaryCta: facts.ctaLabel || str(hero.primary_cta, 40) || lib.cta,
       secondaryCta: str(hero.secondary_cta, 40) || lib.cta2,
       trustSignals: trust.length ? trust : [...facts.proof, ...lib.trust.map(([value, label]) => ({ value, label }))].slice(0, 3),
       services
@@ -567,8 +609,11 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
     gallery: facts.gallery,
     seoKeywords: [...new Set([primaryKeyword, ...(facts.keywords || [])])].slice(0, 6),
     statement: str(ai?.statement, 220) || lib.statement || '',
+    collection: normalizeCollection(ai?.collection),
+    imagePrompts: Object.fromEntries(Object.entries(ai?.image_prompts && typeof ai.image_prompts === 'object' ? ai.image_prompts : {}).map(([key, value]) => [key, str(value, 600)]).filter(([, value]) => value)),
+    headingStyle: str(ai?.design?.heading_style, 20).toLowerCase(),
     marquee: cleanList(ai?.marquee, (item) => str(item, 40), 3, 10).length ? cleanList(ai?.marquee, (item) => str(item, 40), 3, 10) : services.map((service) => service.title).slice(0, 8),
-    onePage: Boolean(facts.onePage || (!facts.pages.length && ai?.one_page === true)),
+    onePage: Boolean(facts.onePage || (!facts.pages.length && (ai?.one_page === true || (Array.isArray(ai?.pages) && ai.pages.filter((page) => !/^(home|contact)/i.test(String(page))).length === 0)))),
     contactOnHome: facts.onePage,
     aiDesign: {
       direction: str(ai?.design?.direction, 20).toLowerCase(),
@@ -580,6 +625,55 @@ export function buildBriefAndContent({ facts, ai, metadata = {} }) {
     pageCopy
   };
   return { brief, content };
+}
+
+/** Validate the AI's browsable collection (trips, products, courses...) into a safe shape. */
+export function normalizeCollection(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) return null;
+  const seen = new Set();
+  const items = raw.items.slice(0, 18).map((item, index) => {
+    const title = str(item?.title, 90);
+    if (!title) return null;
+    let id = String(item.id || title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || `item-${index + 1}`;
+    while (seen.has(id)) id = `${id}-${index + 1}`;
+    seen.add(id);
+    const price = Number(String(item.price ?? '').replace(/[^0-9.]/g, ''));
+    return {
+      id,
+      title,
+      category: str(item.category, 40),
+      location: str(item.location, 80),
+      price: Number.isFinite(price) && price > 0 ? Math.round(price * 100) / 100 : null,
+      duration: str(item.duration, 40),
+      tag: str(item.tag, 40),
+      summary: str(item.summary, 320),
+      highlights: arr(item.highlights).map((h) => str(h, 90)).filter(Boolean).slice(0, 6),
+      itinerary: arr(item.itinerary).map((step) => (str(step?.title, 60) ? { title: str(step.title, 60), detail: str(step.detail, 320) } : null)).filter(Boolean).slice(0, 8),
+      imagePrompt: str(item.image_prompt, 500)
+    };
+  }).filter(Boolean);
+  if (items.length < 2) return null;
+  const categories = [...new Set([...arr(raw.categories).map((c) => str(c, 40)).filter(Boolean), ...items.map((item) => item.category).filter(Boolean)])].slice(0, 8);
+  const booking = raw.booking && typeof raw.booking === 'object' && raw.booking.enabled !== false ? {
+    cta: str(raw.booking.cta, 40) || 'Book now',
+    quantityLabel: str(raw.booking.quantity_label, 40) || 'Number of people',
+    dateLabel: str(raw.booking.date_label, 40) || 'Date',
+    maxQuantity: Math.min(20, Math.max(1, Number(raw.booking.max_quantity) || 8)),
+    confirmation: str(raw.booking.confirmation, 300) || 'This is a demo booking request. No booking has been made and no payment has been taken.'
+  } : null;
+  const filters = raw.filters && typeof raw.filters === 'object' ? raw.filters : {};
+  return {
+    label: str(raw.label, 40) || 'Browse',
+    itemLabel: str(raw.item_label, 30) || 'item',
+    intro: str(raw.intro, 240),
+    currency: /^[A-Z]{3}$/.test(String(raw.currency || '')) ? raw.currency : 'GBP',
+    priceSuffix: str(raw.price_suffix, 30),
+    categories,
+    filters: { category: filters.category !== false && categories.length > 1, maxPrice: filters.max_price !== false && items.some((item) => item.price), sortPrice: filters.sort_price !== false && items.some((item) => item.price) },
+    favourites: raw.favourites !== false,
+    booking,
+    items
+  };
 }
 
 function serviceFromLibrary(title, lib, pricing = []) {

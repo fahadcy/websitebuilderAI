@@ -52,6 +52,7 @@ function contactHref(ctx) {
 }
 
 function servicesHref(ctx) {
+  if (ctx.content.collection) return ctx.isHome || ctx.onePage ? (ctx.isHome ? '#explore' : 'index.html#explore') : ctx.collectionPage || 'index.html#explore';
   if (ctx.onePage) return ctx.isHome ? '#services' : 'index.html#services';
   return ctx.servicesPage || contactHref(ctx);
 }
@@ -409,14 +410,14 @@ export function processSection(ctx) {
   if (!steps.length) return '';
   const variant = ctx.variant('process');
   if (variant === 'timeline') {
-    return `<section class="section process process-timeline">
+    return `<section class="section process process-timeline" id="how-it-works">
   <div class="container process-grid">
     <div class="process-sticky">${sectionHead(ctx, 'How it works', 'Simple from the very first step')}</div>
     <ol class="timeline" data-timeline><span class="timeline-fill" aria-hidden="true"></span>${steps.map((step, index) => `<li data-reveal="left" style="--d:${index * 0.05}s"><span class="step-dot">${index + 1}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></li>`).join('')}</ol>
   </div>
 </section>`;
   }
-  return `<section class="section process process-steps">
+  return `<section class="section process process-steps" id="how-it-works">
   <div class="container">
     ${sectionHead(ctx, 'How it works', 'Simple from the very first step')}
     <ol class="steps" data-stagger>${steps.map((step, index) => `<li data-reveal="up" style="--d:${index * 0.1}s"><span class="step-num">${index + 1}</span><h3>${esc(step.title)}</h3><p>${esc(step.text)}</p></li>`).join('')}</ol>
@@ -478,10 +479,19 @@ export function gallery(ctx) {
 export function testimonials(ctx) {
   const items = ctx.content.testimonials || [];
   if (!items.length) return '';
-  return `<section class="section quotes">
+  const allSample = items.every((item) => item.sample);
+  if (items.length <= 4) {
+    return `<section class="section quotes" id="reviews">
   <div class="container">
-    ${sectionHead(ctx, 'Reviews', 'What people say')}
-    <div class="quote-slider" data-slider>${items.map((item, index) => `<blockquote class="quote${index ? '' : ' is-active'}"><p>${esc(item.quote)}</p>${item.name ? `<cite>${esc(item.name)}</cite>` : ''}</blockquote>`).join('')}
+    ${sectionHead(ctx, allSample ? 'Sample reviews' : 'Reviews', 'What travellers say'.replace('travellers', ctx.content.collection?.itemLabel === 'trip' ? 'travellers' : 'people'), allSample ? 'Illustrative reviews written for this demo site.' : '')}
+    <div class="review-grid">${items.map((item, index) => `<figure class="review" data-reveal="up" style="--d:${index * 0.08}s">${item.sample ? '<p class="sample-label">Sample review</p>' : ''}<div class="stars" aria-hidden="true">★★★★★</div><blockquote><p>${esc(item.quote)}</p></blockquote>${item.name ? `<figcaption><strong>${esc(item.name)}</strong>${item.detail ? `<span>${esc(item.detail)}</span>` : ''}</figcaption>` : ''}</figure>`).join('')}</div>
+  </div>
+</section>`;
+  }
+  return `<section class="section quotes" id="reviews">
+  <div class="container">
+    ${sectionHead(ctx, allSample ? 'Sample reviews' : 'Reviews', 'What people say')}
+    <div class="quote-slider" data-slider>${items.map((item, index) => `<blockquote class="quote${index ? '' : ' is-active'}">${item.sample ? '<p class="sample-label">Sample review</p>' : ''}<p>${esc(item.quote)}</p>${item.name ? `<cite>${esc(item.name)}${item.detail ? `<span>${esc(item.detail)}</span>` : ''}</cite>` : ''}</blockquote>`).join('')}
       ${items.length > 1 ? `<div class="slider-dots">${items.map((_, index) => `<button type="button" data-dot aria-label="Show review ${index + 1}"${index ? '' : ' aria-current="true"'}></button>`).join('')}<button type="button" class="slider-pause" data-slider-pause aria-pressed="false">Pause</button></div>` : ''}
     </div>
   </div>
@@ -589,7 +599,7 @@ export function contact(ctx) {
       <p class="form-note muted" data-form-note role="status"></p>
     </form>
   </div>
-  ${brief.address || brief.location ? `<div class="container"><div class="map-wrap" data-reveal="up"><iframe title="Map showing ${esc(brief.business_name)}" src="https://maps.google.com/maps?q=${mapQuery}&amp;output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div></div>` : ''}
+  ${brief.address ? `<div class="container"><div class="map-wrap" data-reveal="up"><iframe title="Map showing ${esc(brief.business_name)}" src="https://maps.google.com/maps?q=${mapQuery}&amp;output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div></div>` : ''}
 </section>`;
 }
 
@@ -632,4 +642,75 @@ export function pageSections(ctx) {
 
 export function utilityBody(ctx, html) {
   return `<section class="section"><div class="container prose">${html}</div></section>`;
+}
+
+// ---------------------------------------------------------------------------
+// Interactive collection: trips, products, courses, menu, properties...
+// Cards are real HTML (SEO + editor safe); the runtime adds filtering, sorting,
+// favourites, the detail dialog and the demo booking calculator.
+// ---------------------------------------------------------------------------
+
+export function formatMoney(value, currency = 'GBP') {
+  if (value == null) return '';
+  const symbol = { GBP: '£', EUR: '€', USD: '$' }[currency] || `${currency} `;
+  return `${symbol}${Number(value).toLocaleString('en-GB', { minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
+export function collection(ctx, { heading } = {}) {
+  const c = ctx.content.collection;
+  if (!c) return '';
+  const prices = c.items.map((item) => item.price).filter((price) => price != null);
+  const maxPrice = prices.length ? Math.ceil(Math.max(...prices) / 10) * 10 : 0;
+  const minPrice = prices.length ? Math.floor(Math.min(...prices) / 10) * 10 : 0;
+  const step = maxPrice - minPrice > 400 ? 25 : 10;
+  const plural = `${c.itemLabel}s`;
+  const data = {
+    currency: c.currency, priceSuffix: c.priceSuffix, itemLabel: c.itemLabel, favourites: c.favourites, storageKey: `favourites:${ctx.site.siteId}`,
+    booking: c.booking, items: c.items.map((item) => ({ ...item, image: ctx.img(`item:${item.id}`) }))
+  };
+  const toolbar = `<div class="col-toolbar" role="group" aria-label="Filter and sort ${esc(plural)}">
+      ${c.filters.category ? `<div class="chip-group" role="group" aria-label="${esc(c.itemLabel)} type"><button type="button" class="chip-btn" data-filter-category="" aria-pressed="true">All</button>${c.categories.map((cat) => `<button type="button" class="chip-btn" data-filter-category="${esc(cat)}" aria-pressed="false">${esc(cat)}</button>`).join('')}</div>` : ''}
+      <div class="col-controls">
+        ${c.filters.maxPrice ? `<label class="budget">Max budget <output data-budget-output>${esc(formatMoney(maxPrice, c.currency))}</output><input type="range" data-filter-budget min="${minPrice}" max="${maxPrice}" step="${step}" value="${maxPrice}" aria-describedby="budget-help"><span id="budget-help" class="sr-only">Shows ${esc(plural)} up to this price ${esc(c.priceSuffix || '')}</span></label>` : ''}
+        ${c.filters.sortPrice ? `<label class="sort">Sort by <select data-sort><option value="featured">Recommended</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></select></label>` : ''}
+        ${c.favourites ? `<button type="button" class="fav-filter" data-filter-favourites aria-pressed="false">${icon('heart', 'ico-sm')} Favourites <span data-fav-count>0</span></button>` : ''}
+      </div>
+    </div>`;
+  const cards = c.items.map((item, index) => `<li class="col-card" data-id="${esc(item.id)}" data-category="${esc(item.category)}" data-price="${item.price ?? ''}" data-index="${index}" data-reveal="up" style="--d:${(index % 3) * 0.08}s">
+      <article>
+        <div class="col-img">${image(ctx, `item:${item.id}`, `${item.title}${item.location ? `, ${item.location}` : ''}`, 'cover')}
+          ${item.tag ? `<span class="col-tag">${esc(item.tag)}</span>` : ''}
+          ${c.favourites ? `<button type="button" class="fav-btn" data-fav="${esc(item.id)}" aria-pressed="false" aria-label="Save ${esc(item.title)} to favourites">${icon('heart')}</button>` : ''}
+        </div>
+        <div class="col-body">
+          <p class="col-meta">${[item.category, item.location, item.duration].filter(Boolean).map(esc).join(', ')}</p>
+          <h3>${esc(item.title)}</h3>
+          <p>${esc(item.summary)}</p>
+          <div class="col-foot">
+            ${item.price != null ? `<p class="col-price"><strong>${esc(formatMoney(item.price, c.currency))}</strong>${c.priceSuffix ? ` <span>${esc(c.priceSuffix)}</span>` : ''}</p>` : '<span></span>'}
+            <button type="button" class="btn btn-primary btn-sm" data-open-item="${esc(item.id)}" aria-haspopup="dialog">View ${esc(c.itemLabel)}</button>
+          </div>
+        </div>
+      </article>
+    </li>`).join('');
+  return `<section class="section collection" id="explore" data-collection>
+  <div class="container">
+    ${sectionHead(ctx, c.label, heading || c.intro || `Find your ${c.itemLabel}`, heading ? c.intro : '')}
+    ${toolbar}
+    <p class="col-count" data-col-count aria-live="polite">${c.items.length} ${esc(c.items.length === 1 ? c.itemLabel : plural)}</p>
+    <ul class="col-grid" data-col-grid>${cards}</ul>
+    <div class="col-empty" data-col-empty hidden>
+      <p class="h3">No ${esc(plural)} match those filters</p>
+      <p class="muted">Try a higher budget or a different type, or reset the filters to see everything.</p>
+      <button type="button" class="btn btn-ghost btn-sm" data-reset-filters><span>Reset filters</span></button>
+    </div>
+  </div>
+  <dialog class="col-modal" data-col-modal aria-labelledby="col-modal-title">
+    <div class="col-modal-inner">
+      <button type="button" class="modal-close" data-close-modal aria-label="Close">${icon('plus', 'ico close-ico')}</button>
+      <div data-modal-body></div>
+    </div>
+  </dialog>
+  <script type="application/json" data-collection-json>${JSON.stringify(data).replace(/</g, '\\u003c')}</script>
+</section>`;
 }
