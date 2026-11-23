@@ -177,7 +177,7 @@ export function pick(list, random) {
  * words in the prompt, adds the AI's suggestion, then picks randomly among the best
  * few so repeated prompts still get fresh designs.
  */
-export function chooseDirection({ nature, tone, prompt = '', aiDirection = '', random }) {
+export function chooseDirection({ nature, tone, prompt = '', aiDirection = '', random, bias = {}, avoid = [] }) {
   const lower = String(prompt).toLowerCase();
   const explicit = [
     ['noir', /\b(dark|moody|noir|luxur\w*|opulent|speakeasy|cocktail|black and gold|after dark)\b/],
@@ -199,8 +199,26 @@ export function chooseDirection({ nature, tone, prompt = '', aiDirection = '', r
     // "bold headings" is a typography request, not an energy request.
     if (id === 'kinetic' && /\bbold (?:headings?|headlines?|titles?|type|typography)\b/.test(lower) && !/\b(energetic|loud|sporty|street|high[- ]energy)\b/.test(lower)) score -= 10;
     if (aiDirection === id) score += 5;
+    // Teach Builder: styles users loved for this industry rise, rejected ones sink hard.
+    const learned = Number(bias[id] || 0);
+    score += learned < 0 ? Math.max(-24, learned * 10) : Math.min(9, learned * 6);
+    if (avoid.includes(id)) score -= 6;
     return { id, score: score + random() * 3 };
   }).sort((a, b) => b.score - a.score);
   const top = scored.filter((item) => item.score >= scored[0].score - 4).slice(0, 3);
   return pick(top, random).id;
+}
+
+/** Weighted pick: learned layout preferences tilt the odds, rejected layouts are skipped when possible. */
+export function pickWeighted(list, random, bias = {}) {
+  if (!bias || !Object.keys(bias).length) return pick(list, random);
+  const allowed = list.filter((item) => (bias[item] || 0) > -0.5);
+  const pool = allowed.length ? allowed : list;
+  const weights = pool.map((item) => Math.max(0.15, 1 + Math.max(-0.8, Math.min(2, (bias[item] || 0) * 1.5))));
+  let roll = random() * weights.reduce((sum, w) => sum + w, 0);
+  for (let i = 0; i < pool.length; i += 1) {
+    roll -= weights[i];
+    if (roll <= 0) return pool[i];
+  }
+  return pool[pool.length - 1];
 }

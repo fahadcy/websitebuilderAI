@@ -27,6 +27,8 @@ export async function migrate() {
   ensureColumn('site_feedback', 'positives', 'TEXT');
   ensureColumn('site_feedback', 'negatives', 'TEXT');
   ensureColumn('site_feedback', 'suggested_changes', 'TEXT');
+  ensureColumn('site_feedback', 'details_json', 'TEXT');
+  ensureColumn('generated_sites', 'design_json', 'TEXT');
 
   const adminEmail = process.env.BUILDER_ADMIN_EMAIL || 'admin@example.com';
   const adminPassword = process.env.BUILDER_ADMIN_PASSWORD || 'admin123';

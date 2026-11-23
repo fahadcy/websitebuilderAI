@@ -7,3 +7,4 @@ npm-debug.log*
 *.log
 package.zip
 .DS_Store
+.claude-tmp/

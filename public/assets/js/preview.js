@@ -49,16 +49,108 @@ document.addEventListener('keydown', (event) => {
   feedbackPanel.hidden = true;
 });
 
+let teachContext = null;
+
+async function loadTeachContext() {
+  try {
+    const response = await fetch(`/api/sites/${siteId}/teach-context`);
+    if (!response.ok) throw new Error('unavailable');
+    teachContext = await response.json();
+  } catch {
+    document.getElementById('teach-built').textContent = '';
+    return;
+  }
+  const { design, options, industry, profile } = teachContext;
+  const built = [design.directionName && `Style: ${design.directionName}`, design.mode && `${design.mode} theme`].filter(Boolean).join(' - ');
+  const applied = design.learnedSummary?.length ? ` Built using earlier lessons: ${design.learnedSummary.join(', ')}.` : '';
+  document.getElementById('teach-built').textContent = `${built || 'Design details not recorded for this older site.'}${applied}`;
+  document.getElementById('teach-style-name').textContent = design.directionName
+    ? `This site used the "${design.directionName}" style. Should the engine use it for ${industry} sites?`
+    : 'Style details were not recorded for this older site.';
+  document.getElementById('teach-scope-industry').textContent = `${industry} sites`;
+
+  document.getElementById('teach-aspects').innerHTML = options.aspects.map((aspect) => `
+    <div class="teach-row" role="radiogroup" aria-label="${escapeHtml(aspect.label)} score">
+      <span class="teach-label">${escapeHtml(aspect.label)}</span>
+      <div class="teach-seg teach-seg-tight">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="aspect_${aspect.id}" value="${n}"><span>${n}</span></label>`).join('')}</div>
+    </div>`).join('');
+
+  document.getElementById('teach-dials').innerHTML = options.dials.map((dial) => `
+    <div class="teach-row" role="radiogroup" aria-label="${escapeHtml(dial.label)}">
+      <span class="teach-label">${escapeHtml(dial.label)}</span>
+      <div class="teach-seg">${dial.options.map((label, index) => `<label><input type="radio" name="dial_${dial.id}" value="${index - 1}"${index === 1 ? ' checked' : ''}><span>${escapeHtml(label)}</span></label>`).join('')}</div>
+    </div>`).join('');
+
+  const sections = design.sections || [];
+  document.getElementById('teach-sections').innerHTML = sections.length
+    ? sections.map((section) => `
+      <div class="teach-row" role="radiogroup" aria-label="${escapeHtml(section.label)}">
+        <span class="teach-label">${escapeHtml(section.label)}${section.variant && !['on', 'default', 'interactive'].includes(section.variant) ? ` <small>${escapeHtml(section.variant)} layout</small>` : ''}</span>
+        <div class="teach-seg teach-seg-tight">
+          <label><input type="radio" name="section_${section.kind}" value="1"><span aria-label="Liked">&#128077;</span></label>
+          <label><input type="radio" name="section_${section.kind}" value="-1"><span aria-label="Disliked">&#128078;</span></label>
+        </div>
+      </div>`).join('')
+    : '<p class="teach-hint">Section details were not recorded for this older site. Generate a new site to rate individual sections.</p>';
+
+  document.getElementById('teach-issues').innerHTML = options.issues.map((issue) => `
+    <label><input type="checkbox" name="issue" value="${issue.id}"><span>${escapeHtml(issue.label)}</span></label>`).join('');
+
+  renderProfile(profile);
+}
+
+function renderProfile(profile) {
+  const box = document.getElementById('teach-profile');
+  const list = document.getElementById('teach-profile-list');
+  if (!profile || !profile.summary?.length) { box.hidden = true; return; }
+  list.innerHTML = profile.summary.map((line) => `<li>${escapeHtml(line)}</li>`).join('') + `<li class="teach-hint">From ${profile.samples} piece${profile.samples === 1 ? '' : 's'} of feedback for ${escapeHtml(teachContext?.industry || 'this industry')} (plus "all sites" lessons).</li>`;
+  box.hidden = false;
+}
+
+function collectTeachPayload() {
+  const formData = new FormData(feedbackForm);
+  const details = { aspects: {}, dials: {}, sections: {}, issues: formData.getAll('issue'), style: formData.get('style') || null, scope: formData.get('scope') || 'industry', missed: formData.get('missed') || '', imageNotes: formData.get('imageNotes') || '' };
+  for (const [key, value] of formData.entries()) {
+    if (key.startsWith('aspect_')) details.aspects[key.slice(7)] = Number(value);
+    else if (key.startsWith('dial_') && Number(value) !== 0) details.dials[key.slice(5)] = Number(value);
+    else if (key.startsWith('section_')) details.sections[key.slice(8)] = Number(value);
+  }
+  return {
+    rating: formData.get('rating') || '',
+    category: formData.get('category') || 'general',
+    positives: formData.get('positives') || '',
+    negatives: formData.get('negatives') || '',
+    suggestedChanges: formData.get('suggestedChanges') || '',
+    details
+  };
+}
+
+loadTeachContext();
+
 feedbackForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const payload = collectTeachPayload();
+  if (!payload.rating) {
+    feedbackStatus.textContent = 'Pick an overall rating (1-5) first.';
+    feedbackForm.querySelector('input[name="rating"]').focus();
+    return;
+  }
   feedbackStatus.textContent = 'Saving learning...';
-  const formData = new FormData(feedbackForm);
-  const payload = Object.fromEntries(formData.entries());
-  const response = await fetch(`/api/sites/${siteId}/feedback`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify({ ...payload, _csrf: csrfToken })
-  });
+  const submit = feedbackForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  let response;
+  try {
+    response = await fetch(`/api/sites/${siteId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ ...payload, _csrf: csrfToken })
+    });
+  } catch {
+    feedbackStatus.textContent = 'Could not reach the server. Your answers are still here - try again.';
+    submit.disabled = false;
+    return;
+  }
+  submit.disabled = false;
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     feedbackStatus.textContent = data.error || 'Could not save feedback.';
@@ -67,11 +159,12 @@ feedbackForm.addEventListener('submit', async (event) => {
   const data = await response.json();
   const created = data.signalsCreated || 0;
   const learned = created
-    ? `${created} new lesson${created === 1 ? '' : 's'} learned. ${data.learningRules} lesson${data.learningRules === 1 ? '' : 's'} now shape future ${data.learning?.industry || ''} sites.`
-    : 'Rating saved, but no lesson was learned: fill in at least one of the text boxes to teach the builder.';
+    ? `${created} lesson${created === 1 ? '' : 's'} learned.`
+    : 'Rating saved. Use the dials, issues or text boxes to teach the engine something specific.';
   const logNote = data.logSaved ? ' Added to the Teach Builder log.' : '';
   const mysqlNote = data.mysqlSaved ? ' MySQL mirror updated.' : '';
   feedbackStatus.textContent = `Saved. ${learned}${logNote}${mysqlNote}`;
+  renderProfile(data.profile);
   feedbackForm.reset();
 });
 

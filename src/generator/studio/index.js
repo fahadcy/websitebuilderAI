@@ -5,7 +5,7 @@
 // 3. plan               -> seeded choice of section variants + section order per page
 // 4. render             -> static, editor-safe HTML + CSS + jQuery runtime
 
-import { DIRECTIONS, chooseDirection, seededRandom, pick } from './directions.js';
+import { DIRECTIONS, chooseDirection, seededRandom, pick, pickWeighted } from './directions.js';
 import { buildPalette, hexToOklch, css as oklchCss } from './palette.js';
 import { buildCss } from './styles.js';
 import { buildRuntime } from './runtime.js';
@@ -19,10 +19,13 @@ const IMAGE_KEYS = {
   service: ['serviceSeed', 'service', 'workSeed']
 };
 
-export function planDesign({ brief, content, prompt = '', seed, aiDesign = {} }) {
+export function planDesign({ brief, content, prompt = '', seed, aiDesign = {}, learned = {}, recentDirections = [] }) {
   const random = seededRandom(`${seed}|${brief.business_name}`);
-  const directionId = DIRECTIONS[aiDesign.direction] && aiDesign.lock ? aiDesign.direction : chooseDirection({ nature: brief.project_nature, tone: brief.tone, prompt, aiDirection: aiDesign.direction, random });
-  const baseDirection = DIRECTIONS[directionId];
+  const tune = learned.tune || {};
+  // Recently used styles for this industry get a nudge down (a big one when users said sites look generic).
+  const avoid = (tune.variety || 0) >= 0.4 ? recentDirections.slice(0, 2) : recentDirections.slice(0, 1);
+  const directionId = DIRECTIONS[aiDesign.direction] && aiDesign.lock ? aiDesign.direction : chooseDirection({ nature: brief.project_nature, tone: brief.tone, prompt, aiDirection: aiDesign.direction, random, bias: learned.directionBias || {}, avoid });
+  const baseDirection = tuneMotion(DIRECTIONS[directionId], tune.motion || 0);
   // "bold headings" / AI heading_style bold -> heavier display face for that direction.
   const wantsBoldType = /\bbold (?:headings?|headlines?|titles?|type|typography)\b/i.test(prompt) || content.headingStyle === 'bold';
   const direction = wantsBoldType && baseDirection.boldFonts
@@ -30,24 +33,56 @@ export function planDesign({ brief, content, prompt = '', seed, aiDesign = {} })
     : baseDirection;
   const wantsDark = /\b(dark (?:theme|mode|background|site|website|design|look)|black background|dark,? moody|moody|noir|after dark)\b/i.test(prompt);
   const wantsLight = /\b(light (?:theme|mode|background)|white background|bright and airy)\b/i.test(prompt);
-  const mode = wantsDark ? 'dark' : wantsLight ? 'light' : aiDesign.mode === 'dark' || aiDesign.mode === 'light' ? (direction.mode === 'dark' && aiDesign.mode === 'light' ? 'dark' : aiDesign.mode) : direction.mode;
+  const learnedMode = (tune.theme || 0) >= 0.4 ? 'dark' : (tune.theme || 0) <= -0.4 ? 'light' : '';
+  const mode = wantsDark ? 'dark' : wantsLight ? 'light' : learnedMode || (aiDesign.mode === 'dark' || aiDesign.mode === 'light' ? (direction.mode === 'dark' && aiDesign.mode === 'light' ? 'dark' : aiDesign.mode) : direction.mode);
   const bgSeed = hexToOklch(brief.colours?.background || '');
   const finalMode = bgSeed ? (bgSeed.l <= 0.35 ? 'dark' : bgSeed.l >= 0.8 ? 'light' : mode) : mode;
-  const palette = buildPalette({ primaryHex: brief.colours?.primary || aiDesign.primary, accentHex: brief.colours?.accent || aiDesign.accent, backgroundHex: brief.colours?.background, direction, mode: finalMode });
+  const palette = buildPalette({ primaryHex: brief.colours?.primary || aiDesign.primary, accentHex: brief.colours?.accent || aiDesign.accent, backgroundHex: brief.colours?.background, direction, mode: finalMode, chroma: tune.colour || 0, contrastBoost: tune.contrast || 0 });
+  const vb = learned.variantBias || {};
   const variants = {
-    hero: pick(direction.hero, random),
-    services: pick(direction.services, random),
-    about: pick(direction.about, random),
-    process: pick(direction.process, random),
-    cta: pick(direction.cta, random),
-    footer: pick(direction.footer, random)
+    hero: pickWeighted(direction.hero, random, vb.hero),
+    services: pickWeighted(direction.services, random, vb.services),
+    about: pickWeighted(direction.about, random, vb.about),
+    process: pickWeighted(direction.process, random, vb.process),
+    cta: pickWeighted(direction.cta, random, vb.cta),
+    footer: pickWeighted(direction.footer, random, vb.footer)
   };
   // Aurora heroes need dark; software on a light direction should not get aurora.
   if (variants.hero === 'aurora' && palette.defaultMode !== 'dark') variants.hero = 'split';
   const altServices = direction.services.filter((variant) => variant !== variants.services);
   const onePage = Boolean(content.onePage);
   const useBand = random() > 0.25 && variants.hero !== 'fullbleed';
-  return { directionId, direction, palette, variants, altServices: altServices[0] || variants.services, onePage, useBand, random, seed };
+  const bandBias = vb.band?.on || 0;
+  const useBandFinal = bandBias <= -0.5 ? false : bandBias >= 0.5 ? variants.hero !== 'fullbleed' : useBand;
+  return { directionId, direction, palette, variants, altServices: altServices[0] || variants.services, onePage, useBand: useBandFinal, random, seed, tune, learnedSummary: learned.summary || [], learnedSamples: learned.samples || 0 };
+}
+
+/** Learned motion preference: switch the heavier effects off (less) or on (more). */
+function tuneMotion(direction, motion) {
+  if (Math.abs(motion) < 0.35) return direction;
+  const m = { ...direction.motion };
+  if (motion < 0) Object.assign(m, { preloader: false, cursor: false, magnetic: false, tilt: false, marquee: motion > -0.7 && m.marquee, blobs: motion > -0.7 && m.blobs });
+  else Object.assign(m, { magnetic: true, imageReveal: true, tilt: m.tilt || motion >= 0.7 });
+  return { ...direction, motion: m };
+}
+
+/** Section kinds a user can rate in Teach Builder, with the layout used on this site. */
+export function rateableSections(plan, content) {
+  const keys = homeSections(plan, content);
+  const out = [];
+  const add = (kind, label, variant) => out.push({ kind, label, variant: variant || '' });
+  for (const key of keys) {
+    if (key === 'hero') add('hero', 'Hero (top of page)', plan.variants.hero);
+    else if (key === 'services') add('services', 'Services', plan.variants.services);
+    else if (key === 'collection') add('collection', content.collection?.label || 'Collection', 'interactive');
+    else if (key === 'about') add('about', 'About', plan.variants.about);
+    else if (key === 'band') add('band', 'Parallax image band', 'on');
+    else if (key === 'process') add('process', 'Process / steps', plan.variants.process);
+    else if (key === 'testimonials') add('testimonials', 'Testimonials', 'default');
+    else if (key === 'cta') add('cta', 'Call to action', plan.variants.cta);
+  }
+  add('footer', 'Footer', plan.variants.footer);
+  return out;
 }
 
 function homeSections(plan, content) {
@@ -148,8 +183,8 @@ export function renderStudioSite({ brief, content, site, plan, pages, headFor, l
 
   return {
     html,
-    css: buildCss({ direction: plan.direction, directionId: plan.directionId, palette: plan.palette }),
-    js: buildRuntime({ motion: plan.direction.motion })
+    css: buildCss({ direction: plan.direction, directionId: plan.directionId, palette: plan.palette, tune: plan.tune || {} }),
+    js: buildRuntime({ motion: plan.direction.motion, tune: plan.tune || {} })
   };
 }
 

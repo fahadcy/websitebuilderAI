@@ -40,8 +40,9 @@ export function defaultImagePlan(site) {
     `Use a restrained colour mood compatible with ${palette}.`,
     site.design?.mode === 'dark' ? 'Low-key, moody lighting with deep shadows that sits well on a dark website.' : 'Bright, natural, airy light that sits well on a light website.',
     'Create realistic premium editorial website photography with believable lighting, natural composition, useful negative space, and a commercial art-direction standard.',
-    'Avoid generic stock-photo smiles, random props, over-polished plastic skin, fake signage, visible text, typography, logos, watermarks, UI labels, surreal objects, and unrelated animals.'
-  ].join(' ');
+    'Avoid generic stock-photo smiles, random props, over-polished plastic skin, fake signage, visible text, typography, logos, watermarks, UI labels, surreal objects, and unrelated animals.',
+    site.learnedImageGuidance ? `Lessons from earlier feedback: ${site.learnedImageGuidance}` : ''
+  ].filter(Boolean).join(' ');
   const subject = site.content?.imagePrompts || {};
   return DEFAULT_PURPOSES.map((asset) => ({
     ...asset,
@@ -55,8 +56,9 @@ function photoStyle(site) {
   return [
     'Photorealistic, natural light, authentic and editorial, like a high-end travel or lifestyle magazine.',
     site.design?.mode === 'dark' ? 'Low-key, moody light.' : 'Bright, warm, inviting light.',
-    'No text, no logos, no watermarks, no UI, no people looking at the camera in a posed corporate way.'
-  ].join(' ');
+    'No text, no logos, no watermarks, no UI, no people looking at the camera in a posed corporate way.',
+    site.learnedImageGuidance ? `Lessons from earlier feedback: ${site.learnedImageGuidance}` : ''
+  ].filter(Boolean).join(' ');
 }
 
 /** One image per collection item (trips, products...), capped by COLLECTION_IMAGE_LIMIT. */

@@ -1,24 +1,35 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { DIRECTIONS } from '../generator/studio/directions.js';
 import { db } from '../db/database.js';
 import { recordFeedbackForTraining } from '../db/mysqlTrainingStore.js';
 import { appendTeachLog } from './teachLog.js';
+import { normalizeDetails, detailsAreEmpty, describeDetails, getDesignPreferences, DIALS, ISSUES } from './designPreferences.js';
 
 const MAX_NOTE = 1200;
 
 export async function recordSiteFeedback(siteId, payload = {}, options = {}) {
-  const site = db.prepare('SELECT id, industry, business_name, prompt, status, output_path, zip_path, domain_name, created_at, reality_check_score, reality_check_report, reality_check_verdict FROM generated_sites WHERE id = ?').get(siteId);
+  const site = db.prepare('SELECT id, industry, business_name, prompt, status, output_path, zip_path, domain_name, created_at, reality_check_score, reality_check_report, reality_check_verdict, design_json FROM generated_sites WHERE id = ?').get(siteId);
   if (!site) return null;
   const feedback = normalizeFeedback(payload);
+  const design = siteDesign(site);
+  const details = normalizeDetails(payload.details || {});
+  const hasDetails = !detailsAreEmpty(details);
+  const detailLines = hasDetails ? describeDetails(details, design || {}) : [];
+  // Keep a snapshot of the design next to the feedback so lessons stay tied to what was rated.
+  const detailsRecord = hasDetails ? { ...details, design: design ? { direction: design.direction, directionName: design.directionName, mode: design.mode, variants: design.variants } : null } : null;
   const result = db.prepare(`INSERT INTO site_feedback
-    (site_id, rating, category, feedback_text, positives, negatives, suggested_changes)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(site.id, feedback.rating, feedback.category, feedback.feedbackText, feedback.positives, feedback.negatives, feedback.suggestedChanges);
+    (site_id, rating, category, feedback_text, positives, negatives, suggested_changes, details_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(site.id, feedback.rating, feedback.category, feedback.feedbackText, feedback.positives, feedback.negatives, feedback.suggestedChanges, detailsRecord ? JSON.stringify(detailsRecord) : null);
 
-  const signals = feedbackToSignals(feedback, site.industry);
+  const signals = [...feedbackToSignals(feedback, site.industry), ...detailsToSignals(details, site.industry, design)];
   for (const signal of signals) upsertLearningRule(signal);
-  const saved = { id: result.lastInsertRowid, ...feedback, site, signalsCreated: signals.length };
+  const profile = getDesignPreferences({ industry: site.industry });
+  const saved = { id: result.lastInsertRowid, ...feedback, details: detailsRecord, detailLines, site, signalsCreated: signals.length + (hasDetails ? 1 : 0), profile };
   saved.mysqlSaved = await recordFeedbackForTraining({ site, feedback: saved, learningRules: signals.map(publicSignal) });
   try {
-    saved.logPath = await appendTeachLog({ feedbackId: saved.id, site, feedback, learningRules: signals, siteUrl: options.siteUrl });
+    saved.logPath = await appendTeachLog({ feedbackId: saved.id, site, feedback, learningRules: signals, siteUrl: options.siteUrl, design, detailLines, profile });
   } catch (error) {
     console.warn(`Teach Builder text log not written: ${error.message}`);
   }
@@ -103,6 +114,39 @@ function feedbackToSignals(feedback, industry) {
   if (feedback.rating <= 2 && feedback.category) {
     signals.push(rule('global', '', 'negative', `Low rating: ${feedback.category}`, `For future sites, pay extra attention to ${feedback.category}.`));
   }
+  return signals;
+}
+
+export function siteDesign(site) {
+  if (site?.design_json) {
+    try { return JSON.parse(site.design_json); } catch { /* fall through */ }
+  }
+  // Sites generated before design tracking: the chosen style is still on the <html> tag.
+  try {
+    const head = fs.readFileSync(path.join(site.output_path || '', 'index.html'), 'utf8').slice(0, 1500);
+    const direction = head.match(/data-direction="([a-z]+)"/)?.[1];
+    if (!direction) return null;
+    return { direction, directionName: DIRECTIONS[direction]?.name || direction, mode: head.match(/data-theme="(light|dark)"/)?.[1] || '', variants: {}, sections: [] };
+  } catch {
+    return null;
+  }
+}
+
+/** Text lessons from the structured options, so the AI copywriter hears them too. */
+function detailsToSignals(details, industry, design) {
+  const signals = [];
+  const scope = details.scope === 'global' ? 'global' : 'industry';
+  const target = scope === 'global' ? '' : normalizeIndustry(industry);
+  for (const id of details.issues) {
+    signals.push(rule(scope, target, 'negative', `Issue: ${ISSUES[id].label}`, `Avoid: ${ISSUES[id].label.toLowerCase()}.${ISSUES[id].copy ? ` ${ISSUES[id].copy}` : ''}`));
+  }
+  if (details.missed) signals.push(rule(scope, target, 'request', 'Missed from brief', `Do not miss details like this from the brief: ${details.missed}`));
+  if (details.imageNotes) signals.push(rule(scope, target, 'request', 'Image direction', `Images: ${details.imageNotes}`));
+  for (const [key, value] of Object.entries(details.dials)) {
+    signals.push(rule(scope, target, 'request', `Tuning: ${DIALS[key].label}`, `${DIALS[key].label}: ${DIALS[key].options[value + 1].toLowerCase()} than before.`));
+  }
+  if (details.style === 'love' && design?.directionName) signals.push(rule('industry', normalizeIndustry(industry), 'positive', 'Liked design style', `The "${design.directionName}" style suits ${normalizeIndustry(industry)} sites.`));
+  if (details.style === 'avoid' && design?.directionName) signals.push(rule('industry', normalizeIndustry(industry), 'negative', 'Rejected design style', `The "${design.directionName}" style does not suit ${normalizeIndustry(industry)} sites.`));
   return signals;
 }
 

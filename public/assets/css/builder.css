@@ -231,3 +231,37 @@ footer{padding:2rem clamp(1rem,6vw,6rem);border-top:1px solid #000}
 @keyframes promptPulse{0%,100%{transform:translateY(0);box-shadow:0 0 0 0 rgba(0,0,0,.35)}50%{transform:translateY(-2px);box-shadow:0 0 0 6px rgba(0,0,0,.08)}}
 @media(max-width:900px){.guide-track{grid-template-columns:repeat(2,minmax(0,1fr))}.guide-track button{border-right:1px solid #000;border-bottom:1px solid #000}.generation-layout{grid-template-columns:1fr}.generation-insights{position:static}.timer-grid{grid-template-columns:1fr}.editor-body{overflow:auto}.editor-topbar{height:auto;align-items:flex-start;flex-direction:column;padding:1rem}.editor-shell{height:auto;grid-template-columns:1fr}.editor-panel{border-right:0;border-bottom:1px solid #000}.editor-preview{height:70vh}}
 @media(max-width:760px){.topbar,.preview-bar{height:auto;align-items:flex-start;flex-direction:column;padding:1rem}.onboarding-head{flex-direction:column}.guide-track{grid-template-columns:1fr}.guide-track button{min-height:110px;border-right:0;border-bottom:1px solid #000}.mono-grid,.spec-grid,.brand-input-grid,.readiness-list,.review-grid,.plan-grid,.blueprint-detail,.registration-choice{grid-template-columns:1fr}.review-grid article+article,.plan-grid>div+div,.blueprint-detail>div+div{border-left:0;border-top:1px solid #000}.blueprint-approval{align-items:flex-start;flex-direction:column}.prompt-actions,.mono-submit{align-items:flex-start;flex-direction:column}h1{font-size:3.1rem}.generation-hero h1{font-size:clamp(3.2rem,18vw,5.5rem)}.detailed-steps li{padding-left:3.25rem}.domain-row{grid-template-columns:1fr}}
+
+/* Teach Builder v2 */
+.feedback-panel{width:min(600px,calc(100vw - 2rem))}
+.feedback-panel .teach-built{font-size:.88rem;color:#000;background:#f4f4f4;border:1px solid #000;padding:.55rem .7rem}
+.teach-block{border:1px solid #000;padding:.75rem .85rem;margin:0;display:grid;gap:.65rem;min-width:0}
+.teach-block legend,.teach-block summary{font-weight:900;font-size:.95rem;padding:0 .3rem}
+.teach-block summary{cursor:pointer;padding:.1rem 0;list-style-position:inside}
+.teach-block summary small{font-weight:500;color:#555}
+details.teach-block[open] summary{margin-bottom:.3rem}
+.feedback-panel .teach-hint{font-size:.8rem;color:#555;margin:0}
+.teach-grid{display:grid;gap:.5rem}
+.teach-row{display:grid;grid-template-columns:minmax(0,9.5rem) 1fr;gap:.6rem;align-items:center}
+.teach-label{font-size:.86rem;font-weight:700;line-height:1.25}
+.feedback-panel .teach-label small{display:block;font-size:.72rem;font-weight:500;letter-spacing:0;text-transform:none;color:#666;margin:0}
+.teach-seg,.teach-stars{display:flex;flex-wrap:wrap;gap:0;border:1px solid #000;width:max-content;max-width:100%}
+.teach-seg label,.teach-stars label,.teach-chips label{position:relative;display:block;margin:0;cursor:pointer}
+.teach-seg input,.teach-stars input,.teach-chips input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.feedback-panel .teach-seg span,.feedback-panel .teach-stars span{display:block;padding:.42rem .65rem;font-size:.8rem;font-weight:700;letter-spacing:0;text-transform:none;color:#000;margin:0;border-right:1px solid #000;background:#fff;line-height:1.2;transition:background .15s,color .15s}
+.teach-seg label:last-child span,.teach-stars label:last-child span{border-right:0}
+.feedback-panel .teach-stars span{min-width:2.6rem;text-align:center;font-size:1rem;padding:.55rem .4rem}
+.feedback-panel .teach-seg-tight span{min-width:2.1rem;text-align:center;padding:.38rem .45rem}
+.teach-seg input:checked+span,.teach-stars input:checked+span,.teach-chips input:checked+span{background:#000;color:#fff}
+.teach-seg input:focus-visible+span,.teach-stars input:focus-visible+span,.teach-chips input:focus-visible+span{outline:3px solid #2b6cff;outline-offset:-3px}
+.teach-seg label:hover span,.teach-stars label:hover span{background:#eee}
+.teach-seg input:checked+span:hover{background:#000}
+.teach-chips{display:flex;flex-wrap:wrap;gap:.4rem}
+.feedback-panel .teach-chips span{display:block;border:1px solid #000;padding:.38rem .65rem;font-size:.8rem;font-weight:700;letter-spacing:0;text-transform:none;color:#000;margin:0;background:#fff}
+.teach-profile{border:2px solid #000;padding:.75rem .85rem;background:#fffbe6}
+.teach-profile ul{margin:.3rem 0 0;padding-left:1.1rem;display:grid;gap:.2rem;font-size:.86rem}
+.feedback-panel button[type=submit]{position:sticky;bottom:0}
+@media(max-width:560px){.teach-row{grid-template-columns:1fr}}
+.teach-seg input,.teach-stars input,.teach-chips input{min-height:0;padding:0;width:100%;height:100%}
+.feedback-panel .teach-label{display:block;text-transform:none;letter-spacing:0;font-size:.86rem;font-weight:700;color:#000;margin:0}
+.feedback-panel button[type=submit]{box-shadow:0 -12px 0 #fff;z-index:2}

@@ -38,7 +38,10 @@ export function extractBusinessName(text) {
     new RegExp(`\\b(?:called|named)\\s+(.+?)(?=[,.;:!?\\n]|\\s+${NAME_STOP}\\b|$)`, 'i'),
     new RegExp(`\\b(?:business|company|brand|practice|clinic|shop)\\s+(?:name\\s+)?(?:is|=)\\s+(.+?)(?=[,.;:!?\\n]|\\s+${NAME_STOP}\\b|$)`, 'i'),
     /\b(?:[Ww]ebsite|[Ss]ite|[Hh]omepage|[Ll]anding page)\s+for\s+(?!a\b|an\b|my\b|our\b|the\s+(?:best|local)\b)([A-Z][\w&'’.-]*(?:\s+(?:&|and|of|the|[A-Z][\w&'’.-]*))*)/,
-    /^(?:create|build|make|design)\s+(?:a\s+|an\s+)?(?:[\w-]+\s+){0,4}(?:website|site)\s+for\s+([A-Z][\w&'’.-]*(?:\s+(?:&|and|of|[A-Z][\w&'’.-]*))*)/
+    /^(?:create|build|make|design)\s+(?:a\s+|an\s+)?(?:[\w-]+\s+){0,4}(?:website|site)\s+for\s+([A-Z][\w&'’.-]*(?:\s+(?:&|and|of|[A-Z][\w&'’.-]*))*)/,
+    /\b(?:business|company|brand) name\s*[:\-–]\s*([^\n,.;]{2,60})/i,
+    // Brief that opens with the name: "Brightwell Dental Care, a family practice in Leeds..."
+    /^\s*(?!(?:Create|Build|Make|Design|Please|Hi|Hello|I|We|My|Our|This|A|An|The)\b)([A-Z][\w&'’.-]*(?:\s+(?:&|and|of|the|[A-Z][\w&'’.-]*)){0,5})\s*(?:,|—|–|\s-\s|:|\s+is\s+|\s+are\s+)\s*(?:a|an|the|our|we|family|independent|local|friendly|boutique|award)\b/
   ];
   for (const pattern of patterns) {
     const match = source.match(pattern);
@@ -162,7 +165,9 @@ export function extractContact(text) {
 
 function labelledLine(text, labels) {
   const match = String(text || '').match(new RegExp(`(?:^|\\n|\\.\\s)\\s*(?:${labels})\\s*(?:include|are|:|-)\\s*([^\\n]+)`, 'i'));
-  return match ? match[1].trim() : '';
+  if (!match) return '';
+  // Stop at the next labelled part of a one-paragraph brief ("... emergency appointments. Pages: Home, ...").
+  return match[1].split(/\.\s+(?=[A-Z][\w &/'-]{0,30}:)/)[0].replace(/\.\s*$/, '').trim();
 }
 
 function splitList(line) {

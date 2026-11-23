@@ -11,7 +11,8 @@ import { reviewPrompt } from '../ai/openaiClient.js';
 import { searchCompaniesHouse } from '../integrations/companiesHouse.js';
 import { createZip } from '../packager/zipper.js';
 import { runRealityCheck, realityCheckMarkdown } from '../quality/realityCheck.js';
-import { recordSiteFeedback, getLearningContext } from '../learning/feedbackMemory.js';
+import { recordSiteFeedback, getLearningContext, siteDesign } from '../learning/feedbackMemory.js';
+import { getDesignPreferences, ASPECTS, DIALS, ISSUES } from '../learning/designPreferences.js';
 import { recordManualEditForTraining, recordRealityCheckForTraining } from '../db/mysqlTrainingStore.js';
 
 export const publicRouter = express.Router();
@@ -316,13 +317,33 @@ publicRouter.post('/api/sites/:siteId/reality-check', requireCsrf, async (req, r
   res.json(publicAuditSummary(audit));
 });
 
+// Everything the Teach Builder panel needs: what the engine chose for this site and what it has learned so far.
+publicRouter.get('/api/sites/:siteId/teach-context', (req, res) => {
+  const site = db.prepare('SELECT id, business_name, industry, output_path, design_json FROM generated_sites WHERE id = ?').get(req.params.siteId);
+  if (!site) return res.status(404).json({ error: 'Not found' });
+  const design = siteDesign(site) || {};
+  const profile = getDesignPreferences({ industry: site.industry });
+  const history = db.prepare('SELECT COUNT(*) total, ROUND(AVG(rating), 1) average FROM site_feedback WHERE site_id = ?').get(site.id);
+  res.json({
+    industry: site.industry,
+    design: { direction: design.direction || '', directionName: design.directionName || '', mode: design.mode || '', variants: design.variants || {}, sections: design.sections || [], learnedSummary: design.learnedSummary || [], learnedSamples: design.learnedSamples || 0 },
+    profile: { samples: profile.samples, summary: profile.summary },
+    history,
+    options: {
+      aspects: ASPECTS.map(([id, label]) => ({ id, label })),
+      dials: Object.entries(DIALS).map(([id, dial]) => ({ id, ...dial })),
+      issues: Object.entries(ISSUES).map(([id, issue]) => ({ id, label: issue.label }))
+    }
+  });
+});
+
 publicRouter.post('/api/sites/:siteId/feedback', requireCsrf, async (req, res) => {
   const site = getGeneratedSite(req.params.siteId);
   if (!site) return res.status(404).json({ error: 'Site not found' });
   const saved = await recordSiteFeedback(site.id, req.body || {}, { siteUrl: `${req.protocol}://${req.get('host')}/preview/${site.id}` });
   if (!saved) return res.status(404).json({ error: 'Site not found' });
   const learning = getLearningContext({ industry: site.industry, prompt: site.prompt });
-  res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), signalsCreated: saved.signalsCreated || 0, logSaved: Boolean(saved.logPath), learningRules: learning.rules.length, learning });
+  res.json({ ok: true, feedbackId: saved.id, mysqlSaved: Boolean(saved.mysqlSaved), signalsCreated: saved.signalsCreated || 0, logSaved: Boolean(saved.logPath), learningRules: learning.rules.length, learning, profile: { samples: saved.profile?.samples || 0, summary: saved.profile?.summary || [] }, detailLines: saved.detailLines || [] });
 });
 
 publicRouter.get('/api/domain/check', async (req, res) => {

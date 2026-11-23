@@ -2,8 +2,10 @@
 // jQuery drives interactions/counters; scroll work uses rAF + IntersectionObserver.
 // In the visual editor (?editor=...) it only reveals content and never rewrites the DOM.
 
-export function buildRuntime({ motion }) {
-  const flags = JSON.stringify({ cursor: Boolean(motion.cursor), magnetic: Boolean(motion.magnetic), tilt: Boolean(motion.tilt), preloader: Boolean(motion.preloader) });
+export function buildRuntime({ motion, tune = {} }) {
+  // ps = parallax strength, learned from Teach Builder "less / more animation".
+  const ps = Math.max(0.3, Math.min(1.6, 1 + (Number(tune.motion) || 0) * 0.6));
+  const flags = JSON.stringify({ cursor: Boolean(motion.cursor), magnetic: Boolean(motion.magnetic), tilt: Boolean(motion.tilt), preloader: Boolean(motion.preloader), ps: Number(ps.toFixed(2)) });
   return `/* Site runtime: animations & interactions */
 (function(){
   var FLAGS=${flags};
@@ -70,7 +72,7 @@ export function buildRuntime({ motion }) {
     var y=window.scrollY,vh=window.innerHeight,max=document.body.scrollHeight-vh;
     if(header){header.classList.toggle('is-scrolled',y>40);header.classList.toggle('is-hidden',y>lastY&&y>420&&!doc.classList.contains('menu-open'));}
     if(progress)progress.style.setProperty('--progress',max>0?(y/max).toFixed(4):0);
-    layers.forEach(function(el){var r=el.getBoundingClientRect();if(r.bottom<-200||r.top>vh+200)return;var speed=parseFloat(el.dataset.parallax)||0.2;var offset=(r.top+r.height/2-vh/2)*speed*-1;el.style.transform='translate3d(0,'+offset.toFixed(1)+'px,0)';});
+    layers.forEach(function(el){var r=el.getBoundingClientRect();if(r.bottom<-200||r.top>vh+200)return;var speed=(parseFloat(el.dataset.parallax)||0.2)*FLAGS.ps;var offset=(r.top+r.height/2-vh/2)*speed*-1;el.style.transform='translate3d(0,'+offset.toFixed(1)+'px,0)';});
     statements.forEach(function(el){var r=el.getBoundingClientRect();var p=Math.min(1,Math.max(0,(vh*0.85-r.top)/(r.height+vh*0.35)));var spans=el.querySelectorAll('.sw');var n=Math.round(p*spans.length);spans.forEach(function(s,i){s.classList.toggle('on',i<n);});});
     timelines.forEach(function(el){var r=el.getBoundingClientRect();var p=Math.min(1,Math.max(0,(vh*0.6-r.top)/r.height));el.style.setProperty('--fill',p.toFixed(3));});
     sweep();lastY=y;ticking=false;

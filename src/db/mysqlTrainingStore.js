@@ -170,6 +170,7 @@ export async function migrateMysqlTrainingStore() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   await ensureMysqlUniqueKey(db, 'builder_feedback_signals', 'uniq_feedback_sqlite', '(site_id, sqlite_feedback_id)');
+  await ensureMysqlColumn(db, 'builder_feedback_signals', 'details_json', 'LONGTEXT');
   await createReportingViews(db);
   migrated = true;
   return true;
@@ -199,10 +200,11 @@ export async function recordFeedbackForTraining({ site, feedback, learningRules 
     const reward = rewardFromRating(feedback.rating);
     await db.execute(`
       INSERT INTO builder_feedback_signals
-        (site_id, sqlite_feedback_id, rating, category, feedback_text, positives, negatives, suggested_changes, reward_delta)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (site_id, sqlite_feedback_id, rating, category, feedback_text, positives, negatives, suggested_changes, reward_delta, details_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         rating = VALUES(rating),
+        details_json = VALUES(details_json),
         category = VALUES(category),
         feedback_text = VALUES(feedback_text),
         positives = VALUES(positives),
@@ -218,7 +220,8 @@ export async function recordFeedbackForTraining({ site, feedback, learningRules 
       feedback.positives || '',
       feedback.negatives || '',
       feedback.suggestedChanges || '',
-      reward
+      reward,
+      feedback.details ? json(feedback.details) : null
     ]);
     for (const rule of learningRules) await upsertMysqlLearningRule(db, rule, site.id);
     await db.execute(`
@@ -274,6 +277,9 @@ export async function recordGeneratedSiteRecordForTraining({ site }) {
   return safeMysql('record generated site mirror data', async (db) => {
     await ensureGeneratedSiteStub(db, site);
     if (site.output_path && await pathExists(site.output_path)) await recordPagesAndAssets(db, site.id, site.output_path);
+    if (site.design_json) {
+      await db.execute('UPDATE builder_generation_runs SET design_intelligence_json = COALESCE(design_intelligence_json, ?) WHERE site_id = ?', [site.design_json, site.id]);
+    }
     const audit = parseJson(site.reality_check_report);
     if (audit) {
       await db.execute(`
@@ -419,6 +425,12 @@ async function safeMysql(label, action) {
   }
 }
 
+async function ensureMysqlColumn(db, table, column, type) {
+  const [rows] = await db.query(`SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, [table, column]);
+  if (rows.length) return;
+  await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
 async function ensureMysqlUniqueKey(db, table, keyName, columnsSql) {
   const [rows] = await db.query(`SHOW INDEX FROM ${table} WHERE Key_name = ?`, [keyName]);
   if (rows.length) return;
@@ -436,7 +448,15 @@ async function createReportingViews(db) {
       prompt_text,
       status,
       domain_name,
-      CASE WHEN JSON_VALID(template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(template_profile_json, '$.direction')) END AS design_direction,
+      COALESCE(
+        CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_UNQUOTE(JSON_EXTRACT(design_intelligence_json, '$.direction')) END,
+        CASE WHEN JSON_VALID(template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(template_profile_json, '$.direction')) END
+      ) AS design_direction,
+      CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_UNQUOTE(JSON_EXTRACT(design_intelligence_json, '$.directionName')) END AS design_style_name,
+      CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_UNQUOTE(JSON_EXTRACT(design_intelligence_json, '$.mode')) END AS colour_theme,
+      CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_EXTRACT(design_intelligence_json, '$.variants') END AS section_layouts,
+      CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_EXTRACT(design_intelligence_json, '$.colours') END AS colours,
+      CASE WHEN JSON_VALID(design_intelligence_json) THEN JSON_EXTRACT(design_intelligence_json, '$.learnedSummary') END AS learned_from_feedback,
       CASE WHEN JSON_VALID(template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(template_profile_json, '$.mode')) END AS site_format,
       CASE WHEN JSON_VALID(blueprint_json) THEN JSON_UNQUOTE(JSON_EXTRACT(blueprint_json, '$.visualStrategy')) END AS visual_strategy,
       CASE WHEN JSON_VALID(blueprint_json) THEN JSON_UNQUOTE(JSON_EXTRACT(blueprint_json, '$.projectNature')) END AS project_nature,
@@ -458,7 +478,10 @@ async function createReportingViews(db) {
       g.business_name,
       g.industry,
       g.domain_name,
-      CASE WHEN JSON_VALID(g.template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(g.template_profile_json, '$.direction')) END AS design_direction,
+      COALESCE(
+        CASE WHEN JSON_VALID(g.design_intelligence_json) THEN JSON_UNQUOTE(JSON_EXTRACT(g.design_intelligence_json, '$.direction')) END,
+        CASE WHEN JSON_VALID(g.template_profile_json) THEN JSON_UNQUOTE(JSON_EXTRACT(g.template_profile_json, '$.direction')) END
+      ) AS design_direction,
       g.reality_check_score,
       g.reality_check_verdict,
       g.prompt_text,
@@ -469,6 +492,14 @@ async function createReportingViews(db) {
       f.negatives AS avoid_or_improve,
       f.suggested_changes AS specific_change,
       f.feedback_text AS other_notes,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_EXTRACT(f.details_json, '$.aspects') END AS aspect_scores,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_EXTRACT(f.details_json, '$.dials') END AS tuning_dials,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_EXTRACT(f.details_json, '$.issues') END AS quick_issues,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_EXTRACT(f.details_json, '$.sections') END AS section_votes,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_UNQUOTE(JSON_EXTRACT(f.details_json, '$.style')) END AS style_verdict,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_UNQUOTE(JSON_EXTRACT(f.details_json, '$.missed')) END AS missed_from_brief,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_UNQUOTE(JSON_EXTRACT(f.details_json, '$.imageNotes')) END AS image_notes,
+      CASE WHEN JSON_VALID(f.details_json) THEN JSON_UNQUOTE(JSON_EXTRACT(f.details_json, '$.scope')) END AS applies_to,
       f.reward_delta,
       g.created_at AS site_generated_at_gmt
     FROM builder_feedback_signals f

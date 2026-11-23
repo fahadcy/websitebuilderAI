@@ -15,7 +15,7 @@ export function teachLogPath() {
   return LOG_PATH;
 }
 
-export async function appendTeachLog({ feedbackId, site, feedback, learningRules = [], siteUrl = '' }) {
+export async function appendTeachLog({ feedbackId, site, feedback, learningRules = [], siteUrl = '', design = null, detailLines = [], profile = null }) {
   const audit = parseJson(site.reality_check_report);
   const block = [
     RULE,
@@ -44,6 +44,16 @@ export async function appendTeachLog({ feedbackId, site, feedback, learningRules
     `Specific change:  ${feedback.suggestedChanges || '(blank)'}`,
     feedback.feedbackText ? `Other notes:      ${feedback.feedbackText}` : '',
     '',
+    ...(design ? [
+      '--- DESIGN THE ENGINE CHOSE ---',
+      `Style:            ${design.directionName || design.direction || 'unknown'} (${design.mode || '?'} theme)`,
+      design.variants ? `Layouts:          ${Object.entries(design.variants).map(([k, v]) => `${k}=${v}`).join(', ')}` : '',
+      design.fonts ? `Fonts:            ${design.fonts.display} / ${design.fonts.body}` : '',
+      design.learnedSummary?.length ? `Already learned:  ${design.learnedSummary.join(', ')}` : '',
+      ''
+    ] : []),
+    ...(detailLines.length ? ['--- DETAILED TEACHING ---', ...detailLines.map((line) => `- ${line}`), ''] : []),
+    ...(profile?.summary?.length ? ['--- ENGINE PROFILE AFTER THIS LESSON ---', `${site.industry || 'General'}: ${profile.summary.join(', ')}`, ''] : []),
     '--- LEARNING RULES CREATED FROM THIS FEEDBACK ---',
     ...(learningRules.length
       ? learningRules.map((rule) => `- [${rule.scope}${rule.industry ? `: ${rule.industry}` : ''} | ${rule.signalType}] ${rule.instruction}`)

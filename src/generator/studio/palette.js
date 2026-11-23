@@ -77,10 +77,15 @@ const BLACK = { l: 0.16, c: 0.01, h: 0 };
  * Build a complete light + dark palette from a brand primary (and optional accent).
  * `mode` is the default appearance of the design direction.
  */
-export function buildPalette({ primaryHex, accentHex, backgroundHex, direction, mode = 'light' }) {
-  const seed = hexToOklch(primaryHex) || hexToOklch(direction.defaultPrimary) || { l: 0.5, c: 0.12, h: 220 };
-  const accentSeed = hexToOklch(accentHex) || { l: clamp(seed.l + 0.18, 0.6, 0.85), c: clamp(seed.c * 1.1, 0.08, 0.17), h: (seed.h + direction.accentShift) % 360 };
-  const tint = direction.tint ?? 0.012;
+export function buildPalette({ primaryHex, accentHex, backgroundHex, direction, mode = 'light', chroma = 0, contrastBoost = 0 }) {
+  // Teach Builder "calmer / bolder colours" scales colour strength; brand hues are kept.
+  const chromaScale = 1 + clamp(chroma, -1, 1) * 0.42;
+  const rawSeed = hexToOklch(primaryHex) || hexToOklch(direction.defaultPrimary) || { l: 0.5, c: 0.12, h: 220 };
+  const seed = { ...rawSeed, c: rawSeed.c * chromaScale };
+  const rawAccent = hexToOklch(accentHex);
+  const accentSeed = rawAccent ? { ...rawAccent, c: rawAccent.c * chromaScale } : { l: clamp(seed.l + 0.18, 0.6, 0.85), c: clamp(seed.c * 1.1, 0.08 * chromaScale, 0.17 * chromaScale), h: (seed.h + direction.accentShift) % 360 };
+  const tint = (direction.tint ?? 0.012) * Math.max(0.4, chromaScale);
+  const mutedTarget = 4.6 + Math.max(0, contrastBoost) * 1.6;
   const h = seed.h;
 
   const userBg = hexToOklch(backgroundHex);
@@ -96,7 +101,7 @@ export function buildPalette({ primaryHex, accentHex, backgroundHex, direction, 
     light.surface2 = { l: light.bg.l - 0.035, c: tint * 1.6, h };
   }
   light.ink = { l: 0.2, c: Math.min(0.03, seed.c * 0.25), h };
-  light.muted = ensureContrast({ l: 0.47, c: Math.min(0.03, seed.c * 0.25), h }, light.bg, 4.6);
+  light.muted = ensureContrast({ l: 0.47 - Math.max(0, contrastBoost) * 0.08, c: Math.min(0.03, seed.c * 0.25), h }, light.bg, mutedTarget);
   light.primary = { l: clamp(seed.l, 0.3, 0.62), c: clamp(seed.c, 0.04, 0.2), h };
   light.onPrimary = contrast(WHITE, light.primary) >= 4.5 ? WHITE : BLACK;
   if (contrast(light.onPrimary, light.primary) < 4.5) light.primary = ensureContrast(light.primary, WHITE, 4.6), (light.onPrimary = WHITE);
@@ -112,7 +117,7 @@ export function buildPalette({ primaryHex, accentHex, backgroundHex, direction, 
   dark.surface = { l: dark.bg.l + 0.045, c: dark.bg.c * 1.1, h };
   dark.surface2 = { l: dark.bg.l + 0.09, c: dark.bg.c * 1.2, h };
   dark.ink = { l: 0.96, c: 0.01, h };
-  dark.muted = ensureContrast({ l: 0.74, c: 0.02, h }, dark.bg, 4.6);
+  dark.muted = ensureContrast({ l: 0.74 + Math.max(0, contrastBoost) * 0.08, c: 0.02, h }, dark.bg, mutedTarget);
   dark.primary = { l: clamp(Math.max(seed.l, 0.68), 0.62, 0.82), c: clamp(seed.c, 0.06, 0.18), h };
   dark.onPrimary = contrast(BLACK, dark.primary) >= 4.5 ? BLACK : WHITE;
   dark.accent = { l: clamp(accentSeed.l, 0.68, 0.88), c: clamp(accentSeed.c, 0.06, 0.18), h: accentSeed.h };

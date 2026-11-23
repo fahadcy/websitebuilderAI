@@ -10,7 +10,8 @@ import { recordGenerationForTraining } from '../db/mysqlTrainingStore.js';
 import { generateSiteCopy, isAiTextEnabled } from '../ai/openaiClient.js';
 import { parsePromptFacts, buildBriefAndContent } from './pipelineContent.js';
 import { getLearningContext } from '../learning/feedbackMemory.js';
-import { planDesign, renderStudioSite } from './studio/index.js';
+import { getDesignPreferences } from '../learning/designPreferences.js';
+import { planDesign, renderStudioSite, rateableSections } from './studio/index.js';
 import { css as oklchCss } from './studio/palette.js';
 
 const root = process.cwd();
@@ -32,14 +33,24 @@ export async function generatePipelineSite(prompt, progress = () => {}, metadata
   } catch (error) {
     console.warn(`Learning context unavailable: ${error.message}`);
   }
-  const ai = await generateSiteCopy(prompt, facts, learning.promptGuidance);
+  let learned = { tune: {}, directionBias: {}, variantBias: {}, summary: [], samples: 0 };
+  let recentDirections = [];
+  try {
+    learned = getDesignPreferences({ industry: facts.industry });
+    recentDirections = db.prepare(`SELECT design_json FROM generated_sites WHERE lower(industry) = lower(?) AND design_json IS NOT NULL ORDER BY created_at DESC LIMIT 3`)
+      .all(facts.industry).map((row) => { try { return JSON.parse(row.design_json).direction; } catch { return null; } }).filter(Boolean);
+  } catch (error) {
+    console.warn(`Design preferences unavailable: ${error.message}`);
+  }
+  const copyGuidance = [learning.promptGuidance, learned.copyGuidance ? `Rules learned from Teach Builder: ${learned.copyGuidance}` : ''].filter(Boolean).join('\n');
+  const ai = await generateSiteCopy(prompt, facts, copyGuidance);
   const { brief, content: draftContent } = buildBriefAndContent({ facts, ai, metadata });
   const content = buildContentEngine(brief, draftContent);
 
   progress({ status: 'running', progress: 26, message: 'Designing a layout and colour system' });
   const generationSeed = crypto.randomBytes(6).toString('hex');
-  const plan = planDesign({ brief, content, prompt: userPrompt, seed: generationSeed, aiDesign: draftContent.aiDesign || {} });
-  console.log(`[pipeline] ${brief.business_name} | ${brief.industry} (${brief.project_nature}) | copy: ${ai ? 'AI' : 'rule-based fallback'} | learning rules applied: ${learning.rules?.length || 0} | design: ${plan.directionId}/${plan.palette.defaultMode} hero:${plan.variants.hero} services:${plan.variants.services}${plan.onePage ? ' | one-page' : ''}`);
+  const plan = planDesign({ brief, content, prompt: userPrompt, seed: generationSeed, aiDesign: draftContent.aiDesign || {}, learned, recentDirections });
+  console.log(`[pipeline] ${brief.business_name} | ${brief.industry} (${brief.project_nature}) | copy: ${ai ? 'AI' : 'rule-based fallback'} | learning rules applied: ${learning.rules?.length || 0} | design lessons: ${learned.samples || 0}${plan.learnedSummary.length ? ` (${plan.learnedSummary.join(', ')})` : ''} | design: ${plan.directionId}/${plan.palette.defaultMode} hero:${plan.variants.hero} services:${plan.variants.services}${plan.onePage ? ' | one-page' : ''}`);
 
   const siteId = `${slugify(brief.business_name, { lower: true, strict: true }) || 'generated-site'}-${crypto.randomBytes(3).toString('hex')}`;
   const outDir = path.join(root, 'generated-sites', siteId);
@@ -67,8 +78,25 @@ export async function generatePipelineSite(prompt, progress = () => {}, metadata
       pages: brief.pages.map((title) => ({ title, slug: slugForPage(title), purpose: pagePurpose(title, brief), sections: [] }))
     },
     assetMap: {},
-    generatedImages: []
+    generatedImages: [],
+    learnedImageGuidance: learned.imageGuidance || ''
   };
+  const designRecord = {
+    direction: plan.directionId,
+    directionName: plan.direction.name,
+    mode,
+    variants: plan.variants,
+    onePage: plan.onePage,
+    fonts: { display: plan.direction.fonts.display, body: plan.direction.fonts.body },
+    colours: site.tokens.colors,
+    sections: rateableSections(plan, content),
+    tune: plan.tune,
+    learnedSummary: plan.learnedSummary,
+    learnedSamples: plan.learnedSamples,
+    seed: generationSeed
+  };
+  site.designRecord = designRecord;
+  site.designIntelligence = designRecord;
 
   progress({ status: 'running', progress: 34, message: 'Creating photography and artwork' });
   const imageResult = await generateSiteImages(site, outDir, progress);
@@ -101,8 +129,8 @@ export async function generatePipelineSite(prompt, progress = () => {}, metadata
 
   progress({ status: 'running', progress: 90, message: 'Packaging your website' });
   const zipPath = await createZip(outDir, siteId);
-  db.prepare('INSERT INTO generated_sites (id, business_name, industry, prompt, status, output_path, zip_path, domain_name, reality_check_score, reality_check_report, reality_check_verdict) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(siteId, brief.business_name, brief.industry, prompt, 'complete', outDir, zipPath, metadata.domainName || null, audit.score, JSON.stringify(audit), audit.verdict);
+  db.prepare('INSERT INTO generated_sites (id, business_name, industry, prompt, status, output_path, zip_path, domain_name, reality_check_score, reality_check_report, reality_check_verdict, design_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(siteId, brief.business_name, brief.industry, prompt, 'complete', outDir, zipPath, metadata.domainName || null, audit.score, JSON.stringify(audit), audit.verdict, JSON.stringify(designRecord));
   try {
     await recordGenerationForTraining({ site, prompt, outDir, zipPath, audit });
   } catch (error) {
