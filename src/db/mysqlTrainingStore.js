@@ -301,15 +301,18 @@ export async function getMysqlBuilderOverview() {
         (SELECT COUNT(*) FROM builder_rl_events) AS reward_events
     `);
     const [sites] = await db.query(`
-      SELECT site_id, business_name, industry, status, domain_name, reality_check_score, reality_check_verdict, output_path, zip_path, created_at, updated_at
+      SELECT site_id, business_name, industry, status, domain_name, reality_check_score, reality_check_verdict, output_path, zip_path,
+        created_at_gmt AS created_at, updated_at_gmt AS updated_at
       FROM builder_generated_sites
-      ORDER BY updated_at DESC
+      ORDER BY updated_at_gmt DESC
       LIMIT 50
     `);
     const [feedback] = await db.query(`
-      SELECT id, site_id, business_name, industry, rating, category, positives, negatives, suggested_changes, reward_delta, created_at
+      SELECT id, site_id, business_name, industry, rating, category,
+        what_worked_well AS positives, avoid_or_improve AS negatives, specific_change AS suggested_changes,
+        other_notes AS feedback_text, reward_delta, submitted_at_gmt AS created_at
       FROM builder_teach_builder_feedback
-      ORDER BY created_at DESC
+      ORDER BY submitted_at_gmt DESC
       LIMIT 50
     `);
     const [tables] = await db.query(`
