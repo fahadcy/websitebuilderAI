@@ -496,7 +496,8 @@ async function getPool() {
 // BUILDER_MYSQL_SSL_CA (PEM text, or a path to the .pem file) to verify the server.
 function sslConfig(host = '') {
   const flag = String(process.env.BUILDER_MYSQL_SSL || '').toLowerCase();
-  const wanted = flag === 'true' || flag === '1' || flag === 'required' || (!flag && /aivencloud\.com$/i.test(host));
+  const publicCaHost = /\.tidbcloud\.com$/i.test(host);
+  const wanted = flag === 'true' || flag === '1' || flag === 'required' || (!flag && (/aivencloud\.com$/i.test(host) || publicCaHost));
   if (!wanted || flag === 'false') return undefined;
   const caSetting = process.env.BUILDER_MYSQL_SSL_CA || '';
   let ca = '';
@@ -508,7 +509,10 @@ function sslConfig(host = '') {
       console.warn(`MySQL CA file not readable (${caSetting}): ${error.message}`);
     }
   }
-  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
+  if (ca) return { ca, rejectUnauthorized: true };
+  // TiDB Cloud uses certificates trusted by Node's built-in CA list, so verify fully.
+  if (publicCaHost) return { minVersion: 'TLSv1.2', rejectUnauthorized: true };
+  return { rejectUnauthorized: false };
 }
 
 function mysqlConfig() {
