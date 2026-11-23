@@ -130,7 +130,7 @@ export async function migrateMysqlTrainingStore() {
       source_site_id VARCHAR(160),
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uniq_learning_rule (scope, industry, signal_type, title, instruction(255))
+      UNIQUE KEY uniq_learning_rule (scope(40), industry(120), signal_type(40), title(150), instruction(255))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   await db.query(`
